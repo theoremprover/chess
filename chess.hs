@@ -11,13 +11,10 @@ type Rank = Int
 
 type Coors = (File,Rank)
 
-addIx (dx,dy) (file,rank) = (toEnum $ fromEnum file + dx, 
-
 data Colour = White | Black
 	deriving (Eq,Show)
 
-nextToMove White = Black
-nextToMove Black = White
+coloursToMove = cycle [White,Black]
 
 data PieceType = Pawn | Bishop | Knight | Rook | Queen | King
 	deriving (Show,Eq)
@@ -62,6 +59,8 @@ moveGenerator position = [ |
 	]
 	where
 	board = foldl doMove initialBoard position
-	colour_to_move = 
+	(last_move,colour_to_move) = last $ zip position $ coloursToMove
+	add_coors (dx,dy) (file,rank) = ( toEnum $ fromEnum file + dx, rank+dy )
+
 
 t = moveGenerator initialPosition
