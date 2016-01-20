@@ -6,10 +6,12 @@ import Data.Array
 import Data.Maybe
 
 data File = A | B | C | D | E | F | G | H
-	deriving (Show,Eq,Ord,Ix)
+	deriving (Show,Eq,Ord,Enum)
 type Rank = Int
 
 type Coors = (File,Rank)
+
+addIx (dx,dy) (file,rank) = (toEnum $ fromEnum file + dx, 
 
 data Colour = White | Black
 	deriving (Eq,Show)
@@ -41,21 +43,25 @@ type Position = [Move]
 initialPosition = []
 
 data Move = Move Coors Coors (Maybe Coors) (Maybe PieceType)
-	deriving (Show,Eq)
+	deriving (Eq,Show)
 
-doMove board (Move from to maybe_take maybe_promotion) =
-	board // ( maybe_taking ++ [ (from,Nothing), (to,piece) ] )
+doMove board (Move from to take promotion) =
+	board // ( taking ++ [ (from,Nothing), (to,piece) ] )
 	where
-	piece = case maybe_promotion of
+	piece = case promotion of
 		Nothing       -> board!from
 		Just promoted -> Just (fst (fromJust (board!from)),promoted) where
 			Just (my_colour,_) = board!from
-	maybe_taking = case maybe_take of
+	taking = case take of
 		Nothing       -> []
 		Just take_on  -> [ (take_on,Nothing) ]
 
-moveGenerator position = ()
+moveGenerator position = [ |
+	Just (coors,(colour,piecetype)) <- assocs board,
+	colour==colour_to_move,
+	]
 	where
-	board = foldl doMove 
+	board = foldl doMove initialBoard position
+	colour_to_move = 
 
 t = moveGenerator initialPosition
