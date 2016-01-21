@@ -5,8 +5,7 @@ module Main where
 import Data.Array
 import Data.Maybe
 
-data File = A | B | C | D | E | F | G | H
-	deriving (Show,Eq,Ord,Enum)
+type File = Char
 type Rank = Int
 
 type Coors = (File,Rank)
@@ -36,10 +35,17 @@ initialBoard = listArray ((A,1),(H,8)) [
 	w = Just . (White,)
 	b = Just . (Black,)
 
+pieceMoves White Pawn from@(file,rank) = (
+	[ Move from () Nothing maybe_prom | maybe_prom <- ],
+
 type Position = [Move]
 initialPosition = []
 
-data Move = Move Coors Coors (Maybe Coors) (Maybe PieceType)
+data Move =
+	Move Coors Coors (Maybe PieceType) |
+	Take Coors Coors (Maybe PieceType) |
+	EnPassant Coors Coors |
+	Castle Coors Coors
 	deriving (Eq,Show)
 
 doMove board (Move from to take promotion) =
@@ -56,11 +62,17 @@ doMove board (Move from to take promotion) =
 moveGenerator position = [ |
 	Just (coors,(colour,piecetype)) <- assocs board,
 	colour==colour_to_move,
+	Just move_to <- map (add_coors coors) (piece_to colour piecetype),
+	
 	]
 	where
 	board = foldl doMove initialBoard position
 	(last_move,colour_to_move) = last $ zip position $ coloursToMove
-	add_coors (dx,dy) (file,rank) = ( toEnum $ fromEnum file + dx, rank+dy )
+	piece_to White Pawn = 
+
+	add_coors (file,rank) (dx,dy) = case (fromEnum file + dx, rank + dy ) of
+		(x,y) | 
+		
 
 
 t = moveGenerator initialPosition
