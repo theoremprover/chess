@@ -48,16 +48,19 @@ data Move =
 	Castle Coors Coors
 	deriving (Eq,Show)
 
-doMove board (Move from to take promotion) =
-	board // ( taking ++ [ (from,Nothing), (to,piece) ] )
+doMove board move = board // case move of
+	Move from to promotion          -> [ (from,Nothing), (to,piece from promotion) ]
+	Take from to take promotion     -> [ (take,Nothing), (from,Nothing), (to,piece from promotion) ]
+	EnPassant from@(_,r1) to@(f2,_) -> [ ((f2,r1),Nothing), (from,Nothing), (to,board!from) ]
+	Castle rook@('a',r)               -> let king = ('e',r) in
+		[ (rook,Nothing), (king,Nothing), (('c',r),board!king), (('d',r),board!rook) ]
+	Castle rook@('h',r)               -> let king = ('e',r) in
+		[ (rook,Nothing), (king,Nothing), (('c',r),board!king), (('d',r),board!rook) ]
 	where
-	piece = case promotion of
+	piece from promotion = case promotion of
 		Nothing       -> board!from
-		Just promoted -> Just (fst (fromJust (board!from)),promoted) where
+		Just promoted -> Just (my_colour,promoted) where
 			Just (my_colour,_) = board!from
-	taking = case take of
-		Nothing       -> []
-		Just take_on  -> [ (take_on,Nothing) ]
 
 moveGenerator position = [ |
 	Just (coors,(colour,piecetype)) <- assocs board,
