@@ -55,7 +55,7 @@ doMove board move = board // case move of
 	Castle rook@('a',r)               -> let king = ('e',r) in
 		[ (rook,Nothing), (king,Nothing), (('c',r),board!king), (('d',r),board!rook) ]
 	Castle rook@('h',r)               -> let king = ('e',r) in
-		[ (rook,Nothing), (king,Nothing), (('c',r),board!king), (('d',r),board!rook) ]
+		[ (rook,Nothing), (king,Nothing), (('g',r),board!king), (('f',r),board!rook) ]
 	where
 	piece from promotion = case promotion of
 		Nothing       -> board!from
