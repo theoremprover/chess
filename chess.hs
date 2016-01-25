@@ -22,7 +22,7 @@ type Piece = (Colour,PieceType)
 
 type Board = Array Coors (Maybe Piece)
 
-initialBoard = listArray ((A,1),(H,8)) [
+initialBoard = listArray (('a',1),('h',8)) [
 	w Rook ,w Knight,w Bishop,w King ,w Queen,w Bishop,w Knight,w Rook ,
 	w Pawn ,w Pawn  ,w Pawn  ,w Pawn ,w Pawn ,w Pawn  ,w Pawn  ,w Pawn ,
 	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
@@ -35,17 +35,19 @@ initialBoard = listArray ((A,1),(H,8)) [
 	w = Just . (White,)
 	b = Just . (Black,)
 
+{-
 pieceMoves White Pawn from@(file,rank) = (
 	[ Move from () Nothing maybe_prom | maybe_prom <- ],
+-}
 
 type Position = [Move]
 initialPosition = []
 
 data Move =
 	Move Coors Coors (Maybe PieceType) |
-	Take Coors Coors (Maybe PieceType) |
+	Take Coors Coors Coors (Maybe PieceType) |
 	EnPassant Coors Coors |
-	Castle Coors Coors
+	Castle Coors
 	deriving (Eq,Show)
 
 doMove board move = board // case move of
@@ -63,19 +65,19 @@ doMove board move = board // case move of
 			Just (my_colour,_) = board!from
 
 moveGenerator position = [ |
-	Just (coors,(colour,piecetype)) <- assocs board,
-	colour==colour_to_move,
+	(coors,Just (colour,piecetype)) <- assocs board,
+	colour == colour_to_move,
 	Just move_to <- map (add_coors coors) (piece_to colour piecetype),
 	
 	]
 	where
 	board = foldl doMove initialBoard position
-	(last_move,colour_to_move) = last $ zip position $ coloursToMove
+	(colour_to_move,_):(_,last_move):_ = reverse $ zip moveColours $ map (const Just) position ++ [Nothing]
+	(last_move,last_colour) = last $ zip position $ coloursToMove
 	piece_to White Pawn = 
 
 	add_coors (file,rank) (dx,dy) = case (fromEnum file + dx, rank + dy ) of
 		(x,y) | 
 		
-
 
 t = moveGenerator initialPosition
