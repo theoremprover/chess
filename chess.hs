@@ -64,20 +64,22 @@ doMove board move = board // case move of
 		Just promoted -> Just (my_colour,promoted) where
 			Just (my_colour,_) = board!from
 
-moveGenerator position = [ |
-	(coors,Just (colour,piecetype)) <- assocs board,
+moveGenerator position = [ Move from to promotion |
+	(from,Just (colour,piecetype)) <- assocs board,
 	colour == colour_to_move,
-	Just move_to <- map (add_coors coors) (piece_to colour piecetype),
-	
+	Just (to,empty) <- map (add_coors coors) $ \ to -> case (colour_to_move,piecetype) of
+		Pawn
+	board!to == Nothing
 	]
 	where
 	board = foldl doMove initialBoard position
-	(colour_to_move,_):(_,last_move):_ = reverse $ zip moveColours $ map (const Just) position ++ [Nothing]
-	(last_move,last_colour) = last $ zip position $ coloursToMove
-	piece_to White Pawn = 
+	(colour_to_move,_):(_,last_move):_ = reverse $ zip moveColours $ map Just position ++ [Nothing]
 
-	add_coors (file,rank) (dx,dy) = case (fromEnum file + dx, rank + dy ) of
-		(x,y) | 
-		
+	add_coors (file,rank) (dx,dy) = case ( fromEnum file + dx, rank + dy ) of
+		(x,y) | x `elem` ['a'..'h'] && y `elem` [1..8] -> Just (toEnum x,y)
+		_ -> Nothing
+	
+	piece_move_to White Pawn (x0,y0) (x,y) = (x,y+1) : if y0==2 then [(x,y+2)] else []
+	piece_move_to Black Pawn (x0,y0) (x,y) = (x,y-1) : if y0==7 then [(x,y-2)] else []
 
 t = moveGenerator initialPosition
