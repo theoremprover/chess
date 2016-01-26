@@ -67,9 +67,16 @@ doMove board move = board // case move of
 moveGenerator position = [ Move from to promotion |
 	(from,Just (colour,piecetype)) <- assocs board,
 	colour == colour_to_move,
-	Just (to,empty) <- map (add_coors coors) $ \ to -> case (colour_to_move,piecetype) of
-		Pawn
-	board!to == Nothing
+	(d_coors,empties) <- case (colour_to_move,piecetype,from) of
+		(White,Pawn,(_,r)) -> ((0,1),[]) : if rank==2 then ((0,2),[(0,1)]) else []
+		(Black,Pawn,(_,r)) -> ((0,-1),[]) : if rank==2 then ((0,-2),[(0,-1)]) else []
+		(_,Knight,_) -> [ (dx,dy) | dx <- [-2..2], dy <- [-2..2], abs dx + abs dy = 3 ]
+		(_,Bishop,_) -> [ (
+
+	isNothing (board!to),
+	promotion <- case (piecetype,to) of
+		(Pawn,(_,rank)) | rank==1 || rank==8 -> map Just [Queen,Knight,Rook,Bishop]
+		_ -> [Nothing]
 	]
 	where
 	board = foldl doMove initialBoard position
