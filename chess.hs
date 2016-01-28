@@ -4,11 +4,14 @@ module Main where
 
 import Data.Array
 import Data.Maybe
+import Data.NumInstances
 
 type File = Char
 type Rank = Int
 
 type Coors = (File,Rank)
+instance Num Coors where
+	
 
 data Colour = White | Black
 	deriving (Eq,Show)
@@ -67,18 +70,26 @@ doMove board move = board // case move of
 moveGenerator position = [ Move from to promotion |
 	(from,Just (colour,piecetype)) <- assocs board,
 	colour == colour_to_move,
-	(d_coors,empties) <- case (colour_to_move,piecetype,from) of
-		(White,Pawn,(_,r)) -> ((0,1),[]) : if rank==2 then ((0,2),[(0,1)]) else []
-		(Black,Pawn,(_,r)) -> ((0,-1),[]) : if rank==2 then ((0,-2),[(0,-1)]) else []
-		(_,Knight,_) -> [ (dx,dy) | dx <- [-2..2], dy <- [-2..2], abs dx + abs dy = 3 ]
-		(_,Bishop,_) -> [ (
-
-	isNothing (board!to),
+	(to,empties) <- movetargets colour_to_move piecetype from
+	all isNothing $ map (board!) (to:empties),
 	promotion <- case (piecetype,to) of
 		(Pawn,(_,rank)) | rank==1 || rank==8 -> map Just [Queen,Knight,Rook,Bishop]
 		_ -> [Nothing]
 	]
 	where
+	straight@[south,north,east,west] = [(0,-1),(0,1),(1,0),(-1,0)]
+	diagonal = [ north+east,north+west,south+east,south+west ]
+
+	movetargets colour_to_move piecetype from = case (colour_to_move,piecetype,from) of
+		(White,Pawn,(_,r)) -> (north,[]) : if r==2 then [(north*2,[north])] else []
+		(Black,Pawn,(_,r)) -> (south,[]) : if r==7 then [(south*2,[south])] else []
+		(_,Knight,_) -> [ (s,[]) | s <- [
+			north*2+east,north*2+west,east*2+north,east*2+south,
+			south*2+east,south*2+west,west*2+north,west*2+south ] ]
+		(_,Bishop,_) -> [ (s*l,empties) | s <- diagonal, l <- [1..7], empties <- [ s*i | i <- [1..l] ] ]
+		(_,Rook,_)   -> [ (s*l,empties) | s <- straight, l <- [1..7], empties <- [ s*i | i <- [1..l] ] ]
+		(_,Queen,_) -> movetargets colour_to_move Bishop from ++ movetargets colour_to_move Rook from
+
 	board = foldl doMove initialBoard position
 	(colour_to_move,_):(_,last_move):_ = reverse $ zip moveColours $ map Just position ++ [Nothing]
 
