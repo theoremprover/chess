@@ -59,12 +59,15 @@ doMove board move = board // case move of
 		Just promoted -> Just (my_colour,promoted) where
 			Just (my_colour,_) = board!from
 
+createBoard position = foldl doMove initialBoard position
+
 moveGenerator position = [ Move from to promotion |
 	(from,Just (colour,piecetype)) <- assocs board,
 	colour == colour_to_move,
 	(to_d,empties_d) <- movetargets colour_to_move piecetype from,
-	Just to <- [map (add_coors from) to_d],
-	all isNothing $ map (board!) (to : empties),
+	Just to <- [addrelcoors from to_d],
+	isNothing $ board!to,
+	all isNothing $ map (board!) $ catMaybes $ map (addrelcoors from) empties_d,
 	promotion <- case (piecetype,to) of
 		(Pawn,(_,rank)) | rank==1 || rank==8 -> map Just [Queen,Knight,Rook,Bishop]
 		_ -> [Nothing]
@@ -72,6 +75,9 @@ moveGenerator position = [ Move from to promotion |
 	where
 	straight@[south,north,east,west] = [(0,-1),(0,1),(1,0),(-1,0)]
 	diagonal = [ north+east,north+west,south+east,south+west ]
+	addrelcoors (file,rank) (dx,dy) = case ( file + dx, rank + dy ) of
+		(x,y) | x `elem` [1..8] && y `elem` [1..8] -> Just (x,y)
+		_ -> Nothing
 
 	movetargets colour_to_move piecetype from = case (colour_to_move,piecetype,from) of
 		(White,Pawn,(_,r)) -> (north,[]) : if r==2 then [(north*2,[north])] else []
@@ -82,16 +88,13 @@ moveGenerator position = [ Move from to promotion |
 		(_,Bishop,_) -> [ (s*(l,l), [ s*(i,i) | i <- [1..l] ]) | s <- diagonal, l <- [1..7] ]
 		(_,Rook,  _) -> [ (s*(l,l), [ s*(i,i) | i <- [1..l] ]) | s <- straight, l <- [1..7] ]
 		(_,Queen, _) -> movetargets colour_to_move Bishop from ++ movetargets colour_to_move Rook from
+		(_,King,  _) -> map (,[]) $ diagonal++straight
 
-	board = foldl doMove initialBoard position
+	board = createBoard position
 	last_move = if length position == 0 then Nothing else Just (last position)
 	(colour_to_move,_):_ = reverse $ zip coloursToMove $ map Just position ++ [Nothing]
 
-	add_coors (file,rank) (dx,dy) = case ( file + dx, rank + dy ) of
-		(x,y) | x `elem` [1..8] && y `elem` [1..8] -> Just (x,y)
-		_ -> Nothing
-
-	piece_move_to White Pawn (x0,y0) (x,y) = (x,y+1) : if y0==2 then [(x,y+2)] else []
-	piece_move_to Black Pawn (x0,y0) (x,y) = (x,y-1) : if y0==7 then [(x,y-2)] else []
-
+showPos position = do
+	let board = createBoard position
+	forM_ [8..1] $ \ 
 t = moveGenerator initialPosition
