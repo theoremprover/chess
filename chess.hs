@@ -5,6 +5,8 @@ module Main where
 import Data.Array
 import Data.Maybe
 import Data.NumInstances
+import Control.Monad
+import GHC.IO.Encoding
 
 type File = Int
 type Rank = Int
@@ -96,5 +98,15 @@ moveGenerator position = [ Move from to promotion |
 
 showPos position = do
 	let board = createBoard position
-	forM_ [8..1] $ \ 
+	forM_ [8,7..1] $ \ rank -> do
+		line <- forM [1..8] $ \ file -> return $ case board!(file,rank) of
+			Nothing              -> if mod (file+rank) 2 == 0 then ' ' else ' '
+			Just (colour,King)   -> if colour==White then '♔' else '♚'
+			Just (colour,Queen)  -> if colour==White then '♕' else '♛'
+			Just (colour,Rook)   -> if colour==White then '♖' else '♜'
+			Just (colour,Bishop) -> if colour==White then '♗' else '♝'
+			Just (colour,Knight) -> if colour==White then '♘' else '♞'
+			Just (colour,Pawn)   -> if colour==White then '♙' else '♟'
+		putStrLn line
+
 t = moveGenerator initialPosition
