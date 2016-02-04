@@ -6,8 +6,6 @@ import Data.Array
 import Data.Maybe
 import Data.NumInstances
 import Control.Monad
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
 
 type File = Int
 type Rank = Int
@@ -97,18 +95,26 @@ moveGenerator position = [ Move from to promotion |
 	last_move = if length position == 0 then Nothing else Just (last position)
 	(colour_to_move,_):_ = reverse $ zip coloursToMove $ map Just position ++ [Nothing]
 
+putStrConsoleLn s = do
+	putStrLn s
+	appendFile "test.txt" (s++"\n")
+
 showPos position = do
 	let board = createBoard position
-	putStrLn $ "\x2808" ++ replicate 8 '\x2809' ++ "\x280a"
+	putStrConsoleLn $ "\xbf" ++ replicate 8 '\xc0' ++ "\xc1"
 	forM_ [8,7..1] $ \ rank -> do
 		line <- forM [1..8] $ \ file -> do
-			return $ toEnum $ 0x2824 + mod (file+rank) 2 * 28 + case board!(file,rank) of
+			return $ toEnum $ 0xd7 + mod (file+rank) 2 * 15 + case board!(file,rank) of
 				Nothing             -> 0
 				Just (colour,piece) -> 1 + fromEnum colour * 6 + fromEnum piece
-		putStrLn $ [toEnum $ 0x280f + rank ] ++ line ++ "\x280c"
-	putStrLn $ "\x280c" ++ map (toEnum.(+0x2817)) [1..8] ++ "\x280f"
+		putStrConsoleLn $ [toEnum $ 0xc6 + rank ] ++ line ++ "\xc3"
+	putStrConsoleLn $ "\xc4" ++ map (toEnum.(+0xce)) [1..8] ++ "\xc6"
 
-t = moveGenerator initialPosition
-
-t2 = do
-	showPos initialPosition
+main = do
+	writeFile "test.txt" ""
+	forM_ (moveGenerator initialPosition) $ \ move -> do
+		putStrConsoleLn "=================================="
+		putStrConsoleLn $ show move
+		showPos [move]
+		s <- getLine
+		return ()
