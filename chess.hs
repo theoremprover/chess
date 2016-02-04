@@ -6,33 +6,34 @@ import Data.Array
 import Data.Maybe
 import Data.NumInstances
 import Control.Monad
-import GHC.IO.Encoding
+import qualified Data.Text as T
+import qualified Data.Text.IO as T
 
 type File = Int
 type Rank = Int
 type Coors = (File,Rank)
 
 data Colour = White | Black
-	deriving (Eq,Show)
+	deriving (Eq,Show,Enum)
 
 coloursToMove = cycle [White,Black]
 
-data PieceType = Pawn | Bishop | Knight | Rook | Queen | King
-	deriving (Show,Eq)
+data PieceType = Pawn | Knight | Bishop | Rook | Queen | King
+	deriving (Show,Eq,Enum)
 
 type Piece = (Colour,PieceType)
 
 type Board = Array Coors (Maybe Piece)
 
-initialBoard = listArray ((1,1),(8,8)) [
-	w Rook ,w Knight,w Bishop,w King ,w Queen,w Bishop,w Knight,w Rook ,
-	w Pawn ,w Pawn  ,w Pawn  ,w Pawn ,w Pawn ,w Pawn  ,w Pawn  ,w Pawn ,
-	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
+initialBoard = array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] [
+	b Rook ,b Knight,b Bishop,b Queen,b King, b Bishop,b Knight,b Rook ,
 	b Pawn ,b Pawn  ,b Pawn  ,b Pawn ,b Pawn ,b Pawn  ,b Pawn  ,b Pawn ,
-	b Rook ,b Knight,b Bishop,b King ,b Queen,b Bishop,b Knight,b Rook ]
+	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
+	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
+	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
+	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
+	w Pawn ,w Pawn  ,w Pawn  ,w Pawn ,w Pawn ,w Pawn  ,w Pawn  ,w Pawn ,
+	w Rook ,w Knight,w Bishop,w Queen,w King, w Bishop,w Knight,w Rook ]
 	where
 	w = Just . (White,)
 	b = Just . (Black,)
@@ -98,17 +99,16 @@ moveGenerator position = [ Move from to promotion |
 
 showPos position = do
 	let board = createBoard position
+	putStrLn $ "\x2808" ++ replicate 8 '\x2809' ++ "\x280a"
 	forM_ [8,7..1] $ \ rank -> do
-		line <- forM [1..8] $ \ file -> return $ case board!(file,rank) of
-			Nothing              -> if mod (file+rank) 2 == 0 then ' ' else ' '
-			Just (colour,King)   -> if colour==White then '♔' else '♚'
-			Just (colour,Queen)  -> if colour==White then '♕' else '♛'
-			Just (colour,Rook)   -> if colour==White then '♖' else '♜'
-			Just (colour,Bishop) -> if colour==White then '♗' else '♝'
-			Just (colour,Knight) -> if colour==White then '♘' else '♞'
-			Just (colour,Pawn)   -> if colour==White then '♙' else '♟'
-		putStrLn line
+		line <- forM [1..8] $ \ file -> do
+			return $ toEnum $ 0x2824 + mod (file+rank) 2 * 28 + case board!(file,rank) of
+				Nothing             -> 0
+				Just (colour,piece) -> 1 + fromEnum colour * 6 + fromEnum piece
+		putStrLn $ [toEnum $ 0x280f + rank ] ++ line ++ "\x280c"
+	putStrLn $ "\x280c" ++ map (toEnum.(+0x2817)) [1..8] ++ "\x280f"
 
 t = moveGenerator initialPosition
 
-tx = ""
+t2 = do
+	showPos initialPosition
