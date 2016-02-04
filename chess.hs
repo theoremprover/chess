@@ -62,17 +62,17 @@ doMove board move = board // case move of
 
 createBoard position = foldl doMove initialBoard position
 
-moveGenerator position = [ Move from to promotion |
-	(from,Just (colour,piecetype)) <- assocs board,
-	colour == colour_to_move,
-	(to_d,empties_d) <- movetargets colour_to_move piecetype from,
-	Just to <- [addrelcoors from to_d],
-	isNothing $ board!to,
-	all isNothing $ map (board!) $ catMaybes $ map (addrelcoors from) empties_d,
-	promotion <- case (piecetype,to) of
-		(Pawn,(_,rank)) | rank==1 || rank==8 -> map Just [Queen,Knight,Rook,Bishop]
-		_ -> [Nothing]
-	]
+moveGenerator position =
+	[ Move from to promotion |
+		(from,Just (colour,piecetype)) <- assocs board,
+		colour == colour_to_move,
+		(to_d,empties_d) <- movetargets colour_to_move piecetype from,
+		Just to <- [addrelcoors from to_d],
+		isNothing $ board!to,
+		all isNothing $ map (board!) $ catMaybes $ map (addrelcoors from) empties_d,
+		promotion <- case (piecetype,to) of
+			(Pawn,(_,rank)) | rank==1 || rank==8 -> map Just [Queen,Knight,Rook,Bishop]
+			_ -> [Nothing] ]
 	where
 	straight@[south,north,east,west] = [(0,-1),(0,1),(1,0),(-1,0)]
 	diagonal = [ north+east,north+west,south+east,south+west ]
