@@ -110,3 +110,5 @@ showPos position = do
 		putStrLn line
 
 t = moveGenerator initialPosition
+
+tx = ""
