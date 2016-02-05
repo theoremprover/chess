@@ -65,7 +65,13 @@ createBoard position = foldl doMove initialBoard position
 moveGenerator position = [ move |
 	(from,Just (colour,piecetype)) <- assocs board,
 	colour == colour_to_move,
-	move <- [ Move from to promotion | 
+	(to_rel,mb_take,empties_d) <- case (colour,piecetype,from) of
+		(White,Pawn,(_,r)) -> (north,Nothing,[]) : if r==2 then [(north*2,Nothing,[north])] else []
+		(Black,Pawn,(_,r)) -> (south,Nothing,[]) : if r==7 then [(south*2,Nothing,[south])] else []
+		
+
+
+	(move,empties_d) <- [ Move from to promotion | 
 		(to_d,empties_d) <- movetargets colour_to_move piecetype from,
 		Just to <- [addrelcoors from to_d],
 		isNothing $ board!to,
