@@ -14,7 +14,9 @@ type Coors = (File,Rank)
 data Colour = White | Black
 	deriving (Eq,Show,Enum)
 
-coloursToMove = cycle [White,Black]
+nextColour White = Black
+nextColour Black = White
+coloursToMove = iterate nextColour White
 
 data PieceType = Pawn | Knight | Bishop | Rook | Queen | King
 	deriving (Show,Eq,Enum)
@@ -39,47 +41,61 @@ initialBoard = array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] 
 type Position = [Move]
 initialPosition = []
 
-data Move =
-	Move Coors Coors (Maybe PieceType) |
-	Take Coors Coors Coors (Maybe PieceType) |
-	EnPassant Coors Coors |
-	Castle Coors
+data Move = Move Coors Coors (Maybe Coors) (Maybe PieceType)
 	deriving (Eq,Show)
 
-doMove board move = board // case move of
-	Move from to promotion          -> [ (from,Nothing), (to,piece from promotion) ]
-	Take from to take promotion     -> [ (take,Nothing), (from,Nothing), (to,piece from promotion) ]
-	EnPassant from@(_,r1) to@(f2,_) -> [ ((f2,r1),Nothing), (from,Nothing), (to,board!from) ]
-	Castle rook@(1,r)               -> let king = (5,r) in
-		[ (rook,Nothing), (king,Nothing), ((3,r),board!king), ((4,r),board!rook) ]
-	Castle rook@(8,r)               -> let king = (5,r) in
-		[ (rook,Nothing), (king,Nothing), ((7,r),board!king), ((6,r),board!rook) ]
-	where
-	piece from promotion = case promotion of
+doMove board (Move from to mb_take mb_promotion) = board // (
+	maybe [] (,Nothing) mb_take :
+	(from,Nothing) :
+	(to,case mb_promotion of
 		Nothing       -> board!from
 		Just promoted -> Just (my_colour,promoted) where
-			Just (my_colour,_) = board!from
+			Just (my_colour,_) = board!from ) :
+	case (from,to,board!!from) of
+		((5,r),(7,_),(Just (colour,King))) -> [ ((8,r),Nothing),((6,r),Just (colour,Rook)) ]
+		((5,r),(3,_),(Just (colour,King))) -> [ ((1,r),Nothing),((4,r),Just (colour,Rook)) ]
+		_ -> [] )
 
 createBoard position = foldl doMove initialBoard position
 
-moveGenerator position = [ move |
+moveGenerator position = [ Move from to mb_take mb_promotion |
 	(from,Just (colour,piecetype)) <- assocs board,
 	colour == colour_to_move,
-	(to_rel,mb_take,empties_d) <- case (colour,piecetype,from) of
-		(White,Pawn,(_,r)) -> (north,Nothing,[]) : if r==2 then [(north*2,Nothing,[north])] else []
-		(Black,Pawn,(_,r)) -> (south,Nothing,[]) : if r==7 then [(south*2,Nothing,[south])] else []
-		
-
-
-	(move,empties_d) <- [ Move from to promotion | 
-		(to_d,empties_d) <- movetargets colour_to_move piecetype from,
-		Just to <- [addrelcoors from to_d],
-		isNothing $ board!to,
+	(to_rel,mb_take_rel,empties_d) <- case (piecetype,from) of
+		(Pawn,(f,r)) -> (pawn_dir,Nothing,[pawn_dir]) :
+			if r == pawn_initial_file then [(pawn_dir*2,Nothing,[pawn_dir,pawn_dir*2])] else [] ++
+			[ (pawn_dir+hor,Just (pawn_dir+hor),[]) | hor <- [east,west], can_take (pawn_dir+hor) ] ++
+			[ (pawn_dir+hor,Just hor,[]) | hor <- [east,west], can_take hor,
+				((Move last_from last_to Nothing Nothing):_) <- reverse position,
+				Just (last_colour,Pawn) <- [board!!last_to], nextColour last_colour == colour,
+				last_from == from+2*pawn_dir+hor, last_to == from+hor ]
+			where
+			(pawn_dir,pawn_initial_file) = if colour==White then (north,2) else (south,7)
+		_ -> map move_or_take $ case piecetype of
+			Knight -> [ (s,[]) | s <- [
+				north*2+east,north*2+west,east*2+north,east*2+south,
+				south*2+east,south*2+west,west*2+north,west*2+south ] ]
+			Bishop -> [ (s*(l,l), [ s*(i,i) | i <- [1..(l-1)] ]) | s <- diagonal, l <- [1..7] ]
+			Rook   -> [ (s*(l,l), [ s*(i,i) | i <- [1..(l-1)] ]) | s <- straight, l <- [1..7] ]
+			Queen  -> movetargets colour_to_move Bishop from ++ movetargets colour_to_move Rook from
+			King   -> map (,[]) $ diagonal++straight
+		where
+		move_or_take (to_rel,empties) = case addrelcoors from to_rel of
+			Nothing -> Nothing
+		can_take on_rel = case addrelcoors from on_rel of
+			Nothing -> False
+			Just on -> maybe False ((== nextColour colour).fst) board!!on
+	Just to <- [ addrelcoors from to_rel ],
+	case mb_take_rel of
+		Nothing -> True
+		Just take_rel -> maybe False (can_take.(board!!)) $ addrelcoors from take_rel 
 	all isNothing $ map (board!) $ catMaybes $ map (addrelcoors from) empties_d,
-	promotion <- case (piecetype,to) of
+	mb_promotion <- case (piecetype,to) of
 		(Pawn,(_,rank)) | rank==1 || rank==8 -> map Just [Queen,Knight,Rook,Bishop]
-		_ -> [Nothing] ]
+		_ -> [Nothing]
+	]
 	where
+	can_take on 
 	straight@[south,north,east,west] = [(0,-1),(0,1),(1,0),(-1,0)]
 	diagonal = [ north+east,north+west,south+east,south+west ]
 	addrelcoors (file,rank) (dx,dy) = case ( file + dx, rank + dy ) of
@@ -89,13 +105,6 @@ moveGenerator position = [ move |
 	movetargets colour_to_move piecetype from = case (colour_to_move,piecetype,from) of
 		(White,Pawn,(_,r)) -> (north,[]) : if r==2 then [(north*2,[north])] else []
 		(Black,Pawn,(_,r)) -> (south,[]) : if r==7 then [(south*2,[south])] else []
-		(_,Knight,_) -> [ (s,[]) | s <- [
-			north*2+east,north*2+west,east*2+north,east*2+south,
-			south*2+east,south*2+west,west*2+north,west*2+south ] ]
-		(_,Bishop,_) -> [ (s*(l,l), [ s*(i,i) | i <- [1..l] ]) | s <- diagonal, l <- [1..7] ]
-		(_,Rook,  _) -> [ (s*(l,l), [ s*(i,i) | i <- [1..l] ]) | s <- straight, l <- [1..7] ]
-		(_,Queen, _) -> movetargets colour_to_move Bishop from ++ movetargets colour_to_move Rook from
-		(_,King,  _) -> map (,[]) $ diagonal++straight
 
 	taketargets colour_to_move piecetype from = case (colour_to_move,piecetype) of
 		(White,Pawn) -> [ (north+east,[]), (north+west,[]) ]
