@@ -61,30 +61,39 @@ createBoard position = foldl doMove initialBoard position
 moveGenerator position = [ Move from to mb_take mb_promotion |
 	(from,Just (colour,piecetype)) <- assocs board,
 	colour == colour_to_move,
-	(to_rel,mb_take_rel,empties_d) <- case (piecetype,from) of
-		(Pawn,(f,r)) -> (pawn_dir,Nothing,[pawn_dir]) :
-			if r == pawn_initial_file then [(pawn_dir*2,Nothing,[pawn_dir,pawn_dir*2])] else [] ++
-			[ (pawn_dir+hor,Just (pawn_dir+hor),[]) | hor <- [east,west], can_take (pawn_dir+hor) ] ++
-			[ (pawn_dir+hor,Just hor,[]) | hor <- [east,west], can_take hor,
-				((Move last_from last_to Nothing Nothing):_) <- reverse position,
-				Just (last_colour,Pawn) <- [board!!last_to], nextColour last_colour == colour,
-				last_from == from+2*pawn_dir+hor, last_to == from+hor ]
-			where
-			(pawn_dir,pawn_initial_file) = if colour==White then (north,2) else (south,7)
-		_ -> map move_or_take $ case piecetype of
+	(to_rel,mb_take_rel,empties_d) <- let
+
+		(pawn_dir,pawn_initial_file) = if colour==White then (north,2) else (south,7)
+
+		move_targets piecetype = case piecetype of
 			Knight -> [ (s,[]) | s <- [
 				north*2+east,north*2+west,east*2+north,east*2+south,
 				south*2+east,south*2+west,west*2+north,west*2+south ] ]
 			Bishop -> [ (s*(l,l), [ s*(i,i) | i <- [1..(l-1)] ]) | s <- diagonal, l <- [1..7] ]
 			Rook   -> [ (s*(l,l), [ s*(i,i) | i <- [1..(l-1)] ]) | s <- straight, l <- [1..7] ]
-			Queen  -> movetargets colour_to_move Bishop from ++ movetargets colour_to_move Rook from
+			Queen  -> move_targets colour_to_move Bishop from ++ move_targets colour_to_move Rook from
 			King   -> map (,[]) $ diagonal++straight
-		where
+
 		move_or_take (to_rel,empties) = case addrelcoors from to_rel of
 			Nothing -> Nothing
+			Just to -> case board!!to of
+				Nothing -> (to_rel,Nothing,to_rel)
+				Just (other_colour,_) | other_colour/=colour -> (to_rel,Just to_rel,[])
+
 		can_take on_rel = case addrelcoors from on_rel of
 			Nothing -> False
 			Just on -> maybe False ((== nextColour colour).fst) board!!on
+
+		in case (piecetype,from) of
+			(Pawn,(f,r)) -> (pawn_dir,Nothing,[pawn_dir]) :
+				if r == pawn_initial_file then [(pawn_dir*2,Nothing,[pawn_dir,pawn_dir*2])] else [] ++
+				[ (pawn_dir+hor,Just (pawn_dir+hor),[]) | hor <- [east,west], can_take (pawn_dir+hor) ] ++
+				[ (pawn_dir+hor,Just hor,[]) | hor <- [east,west], can_take hor,
+					((Move last_from last_to Nothing Nothing):_) <- reverse position,
+					Just (last_colour,Pawn) <- [board!!last_to], nextColour last_colour == colour,
+					last_from == from+2*pawn_dir+hor, last_to == from+hor ]
+			_ -> catMaybes $ map move_or_take (move_targets piecetype),
+
 	Just to <- [ addrelcoors from to_rel ],
 	case mb_take_rel of
 		Nothing -> True
