@@ -97,14 +97,15 @@ moveGenerator position = [ Move from to mb_take mb_promotion |
 	Just to <- [ addrelcoors from to_rel ],
 	case mb_take_rel of
 		Nothing -> True
-		Just take_rel -> maybe False (can_take.(board!!)) $ addrelcoors from take_rel 
+		Just take_rel -> maybe False (can_take.(board!!)) $ addrelcoors from take_rel,
 	all isNothing $ map (board!) $ catMaybes $ map (addrelcoors from) empties_d,
 	mb_promotion <- case (piecetype,to) of
 		(Pawn,(_,rank)) | rank==1 || rank==8 -> map Just [Queen,Knight,Rook,Bishop]
 		_ -> [Nothing]
 	]
 	where
-	can_take on 
+	can_take on = case board!!on of
+		
 	straight@[south,north,east,west] = [(0,-1),(0,1),(1,0),(-1,0)]
 	diagonal = [ north+east,north+west,south+east,south+west ]
 	addrelcoors (file,rank) (dx,dy) = case ( file + dx, rank + dy ) of
