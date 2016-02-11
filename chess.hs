@@ -65,71 +65,63 @@ moveGenerator position = [ Move from to mb_take mb_promotion |
 
 		(pawn_dir,pawn_initial_file) = if colour==White then (north,2) else (south,7)
 
-		move_targets piecetype = case piecetype of
-			Knight -> [ (s,[]) | s <- [
-				north*2+east,north*2+west,east*2+north,east*2+south,
-				south*2+east,south*2+west,west*2+north,west*2+south ] ]
-			Bishop -> [ (s*(l,l), [ s*(i,i) | i <- [1..(l-1)] ]) | s <- diagonal, l <- [1..7] ]
-			Rook   -> [ (s*(l,l), [ s*(i,i) | i <- [1..(l-1)] ]) | s <- straight, l <- [1..7] ]
-			Queen  -> move_targets colour_to_move Bishop from ++ move_targets colour_to_move Rook from
-			King   -> map (,[]) $ diagonal++straight
-
 		move_or_take (to_rel,empties) = case addrelcoors from to_rel of
 			Nothing -> Nothing
 			Just to -> case board!!to of
 				Nothing -> (to_rel,Nothing,to_rel)
 				Just (other_colour,_) | other_colour/=colour -> (to_rel,Just to_rel,[])
 
-		can_take on_rel = case addrelcoors from on_rel of
+		can_take_rel on_rel = case addrelcoors from on_rel of
 			Nothing -> False
-			Just on -> maybe False ((== nextColour colour).fst) board!!on
+			Just on -> can_take colour on
 
 		in case (piecetype,from) of
 			(Pawn,(f,r)) -> (pawn_dir,Nothing,[pawn_dir]) :
 				if r == pawn_initial_file then [(pawn_dir*2,Nothing,[pawn_dir,pawn_dir*2])] else [] ++
-				[ (pawn_dir+hor,Just (pawn_dir+hor),[]) | hor <- [east,west], can_take (pawn_dir+hor) ] ++
-				[ (pawn_dir+hor,Just hor,[]) | hor <- [east,west], can_take hor,
+				[ (pawn_dir+hor,Just (pawn_dir+hor),[]) | hor <- [east,west], can_take_rel (pawn_dir+hor) ] ++
+				[ (pawn_dir+hor,Just hor,[]) | hor <- [east,west], can_take_rel hor,
 					((Move last_from last_to Nothing Nothing):_) <- reverse position,
 					Just (last_colour,Pawn) <- [board!!last_to], nextColour last_colour == colour,
 					last_from == from+2*pawn_dir+hor, last_to == from+hor ]
 			_ -> catMaybes $ map move_or_take (move_targets piecetype),
 
 	Just to <- [ addrelcoors from to_rel ],
-	case mb_take_rel of
-		Nothing -> True
-		Just take_rel -> maybe False (can_take.(board!!)) $ addrelcoors from take_rel,
+	mb_take <- case mb_take_rel of
+		Nothing -> [Nothing]
+		Just take_rel -> case addrelcoors from take_rel of
+			Nothing -> []
+			Just take_on -> if (can_take colour take_on) then [Just take_on] else []
+
 	all isNothing $ map (board!) $ catMaybes $ map (addrelcoors from) empties_d,
 	mb_promotion <- case (piecetype,to) of
 		(Pawn,(_,rank)) | rank==1 || rank==8 -> map Just [Queen,Knight,Rook,Bishop]
 		_ -> [Nothing]
 	]
+
 	where
-	can_take on = case board!!on of
-		
+
+	can_take mycolour on = maybe False ((== nextColour mycolour).fst) board!!on
+
+	move_targets :: PieceType -> [ (Coors,[Coors]) ]
+	move_targets piecetype = case piecetype of
+		Knight -> [ (s,[]) | s <- [
+			north*2+east,north*2+west,east*2+north,east*2+south,
+			south*2+east,south*2+west,west*2+north,west*2+south ] ]
+		Bishop -> [ (s*(l,l), [ s*(i,i) | i <- [1..(l-1)] ]) | s <- diagonal, l <- [1..7] ]
+		Rook   -> [ (s*(l,l), [ s*(i,i) | i <- [1..(l-1)] ]) | s <- straight, l <- [1..7] ]
+		Queen  -> move_targets Bishop ++ move_targets Rook
+		King   -> map (,[]) $ diagonal++straight
+
 	straight@[south,north,east,west] = [(0,-1),(0,1),(1,0),(-1,0)]
 	diagonal = [ north+east,north+west,south+east,south+west ]
 	addrelcoors (file,rank) (dx,dy) = case ( file + dx, rank + dy ) of
 		(x,y) | x `elem` [1..8] && y `elem` [1..8] -> Just (x,y)
 		_ -> Nothing
 
-	movetargets colour_to_move piecetype from = case (colour_to_move,piecetype,from) of
-		(White,Pawn,(_,r)) -> (north,[]) : if r==2 then [(north*2,[north])] else []
-		(Black,Pawn,(_,r)) -> (south,[]) : if r==7 then [(south*2,[south])] else []
-
-	taketargets colour_to_move piecetype from = case (colour_to_move,piecetype) of
-		(White,Pawn) -> [ (north+east,[]), (north+west,[]) ]
-		(Black,Pawn) -> [ (south+east,[]), (south+west,[]) ]
-		_ -> movetargets colour_to_move piecetype from
-
-	eptargets colour_to_move piecetype from = case (colour_to_move,piecetype,from,reverse position) of
-		(White,Pawn,(file,2),Move : _) -> [ (north+east,[]), (north+west,[]) ]
-		(Black,Pawn,(file,7)) -> [ (south+east,[]), (south+west,[]) ]
-		_ -> []
-		where
-		last_move = last position
-
 	board = createBoard position
+
 	last_move = if length position == 0 then Nothing else Just (last position)
+
 	(colour_to_move,_):_ = reverse $ zip coloursToMove $ map Just position ++ [Nothing]
 
 putStrConsoleLn s = do
