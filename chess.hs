@@ -38,25 +38,28 @@ initialBoard = array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] 
 	w = Just . (White,)
 	b = Just . (Black,)
 
-type Position = [Move]
-initialPosition = []
+data Position = Position [Move] Board Colour
+initialPosition = Position [] initialBoard White
 
 data Move = Move Coors Coors (Maybe Coors) (Maybe PieceType)
 	deriving (Eq,Show)
 
-doMove board (Move from to mb_take mb_promotion) = board // (
-	maybe [] ((:[]).(,Nothing)) mb_take ++
-	(from,Nothing) :
-	(to,case mb_promotion of
-		Nothing       -> board!from
-		Just promoted -> Just (my_colour,promoted) where
-			Just (my_colour,_) = board!from ) :
-	case (from,to,board!from) of
-		((5,r),(7,_),(Just (colour,King))) -> [ ((8,r),Nothing),((6,r),Just (colour,Rook)) ]
-		((5,r),(3,_),(Just (colour,King))) -> [ ((1,r),Nothing),((4,r),Just (colour,Rook)) ]
-		_ -> [] )
+doMove :: Position -> Move -> Position
+doMove (Position moves board colour) move@(Move from to mb_take mb_promotion) =
+	Position (moves++[move]) (board // (
+		maybe [] ((:[]).(,Nothing)) mb_take ++
+		(from,Nothing) :
+		(to,case mb_promotion of
+			Nothing       -> board!from
+			Just promoted -> Just (my_colour,promoted) where
+				Just (my_colour,_) = board!from ) :
+		case (from,to,board!from) of
+			((5,r),(7,_),(Just (colour,King))) -> [ ((8,r),Nothing),((6,r),Just (colour,Rook)) ]
+			((5,r),(3,_),(Just (colour,King))) -> [ ((1,r),Nothing),((4,r),Just (colour,Rook)) ]
+			_ -> [] ))
+		(nextColour colour)
 
-moveGenerator moves board = [ Move from to mb_take mb_promotion |
+moveGenerator (Position moves board colour_to_move) = [ Move from to mb_take mb_promotion |
 	(from,Just (colour,piecetype)) <- assocs board,
 	colour == colour_to_move,
 	(to_rel,mb_take_rel,empties_d) <- let
@@ -117,10 +120,6 @@ moveGenerator moves board = [ Move from to mb_take mb_promotion |
 		(x,y) | x `elem` [1..8] && y `elem` [1..8] -> Just (x,y)
 		_ -> Nothing
 
-	last_move = if length position == 0 then Nothing else Just (last position)
-
-	(colour_to_move,_):_ = reverse $ zip coloursToMove $ map Just position ++ [Nothing]
-
 putStrConsoleLn s = do
 	putStrLn s
 --	appendFile "test.txt" (s++"\n")
@@ -135,7 +134,7 @@ showPos board = do
 		putStrConsoleLn $ [toEnum $ 0xc6 + rank ] ++ line ++ "\xc3"
 	putStrConsoleLn $ "\xc4" ++ map (toEnum.(+0xce)) [1..8] ++ "\xc6"
 
-testBoard = array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] [
+testPosition = Position [] $ array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] [
 	Nothing,Nothing ,Nothing ,Nothing,b King, Nothing ,Nothing ,b Rook ,
 	Nothing,b Pawn  ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
 	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
@@ -143,25 +142,23 @@ testBoard = array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] [
 	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
 	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
 	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	w Rook ,Nothing ,Nothing ,Nothing ,w King , Nothing,Nothing,w Rook ]
+	w Rook ,Nothing ,Nothing ,Nothing ,w King,Nothing ,Nothing, w Rook ]
 	where
 	w = Just . (White,)
 	b = Just . (Black,)
 
-
 main = do
 --	writeFile "test.txt" ""
-	step [] testPosition
+	step testPosition (moveGenerator testPosition)
 
-step moves board = do
-	let board' = createBoard moves board
-	forM_ (moveGenerator moves board') $ \ move -> do
-		putStrConsoleLn "=================================="
-		putStrConsoleLn $ show move
-		showPos board
-		print position
-		s <- getLine
-		case s of
-			"" -> return ()
-			"m" -> step $ position ++ [move]
-		return ()
+step _ [] = return ()
+step position (move:left_moves)= do
+	putStrConsoleLn "=================================="
+	putStrConsoleLn $ show move
+	let pos' = doMove position move
+	showPos pos'
+	s <- getLine
+	case s of
+		""  -> step position left_moves
+		"m" -> step (doMove position move) left_moves
+		"b" -> return ()
