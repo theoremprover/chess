@@ -60,7 +60,7 @@ doMove (Position moves board colour) move@(Move from to mb_take mb_promotion) =
 			_ -> [] ))
 		(nextColour colour)
 
-moveGenerator (Position moves board colour_to_move) = [ Move from to mb_take mb_promotion |
+moveGenerator position@(Position moves board colour_to_move) = [ Move from to mb_take mb_promotion |
 	(from,Just (colour,piecetype)) <- assocs board,
 	colour == colour_to_move,
 	(to_rel,mb_take_rel,empties_d) <- let
@@ -82,6 +82,12 @@ moveGenerator (Position moves board colour_to_move) = [ Move from to mb_take mb_
 			Nothing -> False
 			Just _ -> all ((/=coors).moveFrom) moves
 
+		rook_can_castle coors = case board!coors of
+			Just (col,Rook) | col==colour_to_move -> not_moved coors
+			_ -> False
+
+		no_check coors = all ((/=coors).moveFrom) $ moveGenerator (Position moves board (nextColour colour_to_move))
+
 		in case (piecetype,from),colour of
 			(Pawn,(f,r)) -> (pawn_dir,Nothing,[pawn_dir]) :
 				(if r == pawn_initial_file then [(pawn_dir*2,Nothing,[pawn_dir,pawn_dir*2])] else []) ++
@@ -94,13 +100,9 @@ moveGenerator (Position moves board colour_to_move) = [ Move from to mb_take mb_
 				(King,(5,1),White) | not_moved (5,1) && no_check (5,1) ->
 					(if rook_can_castle (8,1) && all no_check [(6,1),(7,1)] then Just (2*east,Nothing,[east,2*east]) else Nothing) :
 					(if rook_can_castle (1,1) && all no_check [(4,1),(3,1)] then Just (2*east,Nothing,[west,2*west,3*west]) else Nothing) : []
-				(King,(5,8),White) | not_moved (5,8) && no_check (5,8) ->
+				(King,(5,8),Black) | not_moved (5,8) && no_check (5,8) ->
 					(if rook_can_castle (8,8) && all no_check [(6,8),(7,8)] then Just (2*east,Nothing,[east,2*east]) else Nothing) :
-					(if rook_can_castle (1,8) && all no_check [(4,8),(3,8)] then Just (2*east,Nothing,[west,2*west,3*west]) else Nothing) : []
-
-					if board!(8,1)==Just (White,Rook) && not_moved (8,1)
-then case && colour==White && not_moved (5,1) && not_moved (8,1) && no_check (5,1) && no_check (6,1) && no_check (7,1)
-				++ ,
+					(if rook_can_castle (1,8) && all no_check [(4,8),(3,8)] then Just (2*east,Nothing,[west,2*west,3*west]) else Nothing) : [],
 
 	Just to <- [ addrelcoors from to_rel ],
 	mb_take <- case mb_take_rel of
