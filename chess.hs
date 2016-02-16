@@ -41,7 +41,8 @@ initialBoard = array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] 
 data Position = Position [Move] Board Colour
 initialPosition = Position [] initialBoard White
 
-data Move = Move Coors Coors (Maybe Coors) (Maybe PieceType)
+data Move = Move {
+	moveFrom :: Coors, moveTo :: Coors, moveTakes :: Maybe Coors, movePromote :: Maybe PieceType }
 	deriving (Eq,Show)
 
 doMove :: Position -> Move -> Position
@@ -77,7 +78,11 @@ moveGenerator (Position moves board colour_to_move) = [ Move from to mb_take mb_
 			Nothing -> False
 			Just on -> can_take colour on
 
-		in case (piecetype,from) of
+		not_moved coors = case board!coors of
+			Nothing -> False
+			Just _ -> all ((/=coors).moveFrom) moves
+
+		in case (piecetype,from),colour of
 			(Pawn,(f,r)) -> (pawn_dir,Nothing,[pawn_dir]) :
 				(if r == pawn_initial_file then [(pawn_dir*2,Nothing,[pawn_dir,pawn_dir*2])] else []) ++
 				[ (pawn_dir+hor,Just (pawn_dir+hor),[]) | hor <- [east,west], can_take_rel (pawn_dir+hor) ] ++
@@ -85,7 +90,17 @@ moveGenerator (Position moves board colour_to_move) = [ Move from to mb_take mb_
 					((Move last_from last_to Nothing Nothing):_) <- [reverse moves],
 					Just (last_colour,Pawn) <- [board!last_to], nextColour last_colour == colour,
 					last_from == from+2*pawn_dir+hor, last_to == from+hor ]
-			_ -> catMaybes $ map move_or_take (move_targets piecetype),
+			_ -> catMaybes $ map move_or_take (move_targets piecetype) ++ case (piecetype,from,colour) of
+				(King,(5,1),White) | not_moved (5,1) && no_check (5,1) ->
+					(if rook_can_castle (8,1) && all no_check [(6,1),(7,1)] then Just (2*east,Nothing,[east,2*east]) else Nothing) :
+					(if rook_can_castle (1,1) && all no_check [(4,1),(3,1)] then Just (2*east,Nothing,[west,2*west,3*west]) else Nothing) : []
+				(King,(5,8),White) | not_moved (5,8) && no_check (5,8) ->
+					(if rook_can_castle (8,8) && all no_check [(6,8),(7,8)] then Just (2*east,Nothing,[east,2*east]) else Nothing) :
+					(if rook_can_castle (1,8) && all no_check [(4,8),(3,8)] then Just (2*east,Nothing,[west,2*west,3*west]) else Nothing) : []
+
+					if board!(8,1)==Just (White,Rook) && not_moved (8,1)
+then case && colour==White && not_moved (5,1) && not_moved (8,1) && no_check (5,1) && no_check (6,1) && no_check (7,1)
+				++ ,
 
 	Just to <- [ addrelcoors from to_rel ],
 	mb_take <- case mb_take_rel of
@@ -124,7 +139,7 @@ putStrConsoleLn s = do
 	putStrLn s
 --	appendFile "test.txt" (s++"\n")
 
-showPos board = do
+showPos (Position moves board colour) = do
 	putStrConsoleLn $ "\xbf" ++ replicate 8 '\xc0' ++ "\xc1"
 	forM_ [8,7..1] $ \ rank -> do
 		line <- forM [1..8] $ \ file -> do
@@ -133,8 +148,9 @@ showPos board = do
 				Just (colour,piece) -> 1 + fromEnum colour * 6 + fromEnum piece
 		putStrConsoleLn $ [toEnum $ 0xc6 + rank ] ++ line ++ "\xc3"
 	putStrConsoleLn $ "\xc4" ++ map (toEnum.(+0xce)) [1..8] ++ "\xc6"
+	putStrConsoleLn $ show colour ++ " to move"
 
-testPosition = Position [] $ array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] [
+testPosition = Position [] (array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] [
 	Nothing,Nothing ,Nothing ,Nothing,b King, Nothing ,Nothing ,b Rook ,
 	Nothing,b Pawn  ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
 	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
@@ -142,7 +158,8 @@ testPosition = Position [] $ array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], 
 	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
 	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
 	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	w Rook ,Nothing ,Nothing ,Nothing ,w King,Nothing ,Nothing, w Rook ]
+	w Rook ,Nothing ,Nothing ,Nothing ,w King,Nothing ,Nothing, w Rook ])
+	Black
 	where
 	w = Just . (White,)
 	b = Just . (Black,)
@@ -162,3 +179,4 @@ step position (move:left_moves)= do
 		""  -> step position left_moves
 		"m" -> step (doMove position move) left_moves
 		"b" -> return ()
+
