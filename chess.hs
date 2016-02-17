@@ -61,11 +61,11 @@ doMove (Position moves board colour) move@(Move from to mb_take mb_promotion) =
 		(nextColour colour)
 
 moveGenerator position@(Position moves board colour_to_move) = [ Move from to mb_take mb_promotion |
+{--
 	(from,Just (colour,piecetype)) <- assocs board,
 	colour == colour_to_move,
 	(to_rel,mb_take_rel,empties_d) <- let
 
-		(pawn_dir,pawn_initial_file) = if colour==White then (north,2) else (south,7)
 
 		move_or_take (to_rel,empties) = case addrelcoors from to_rel of
 			Nothing -> Nothing
@@ -109,18 +109,18 @@ moveGenerator position@(Position moves board colour_to_move) = [ Move from to mb
 		(Pawn,(_,rank)) | rank==1 || rank==8 -> map Just [Queen,Knight,Rook,Bishop]
 		_ -> [Nothing]
 	]
+--}
 
 	where
 
-	can_take mycolour on = maybe False ((== nextColour mycolour).fst) (board!on)
+	--can_take mycolour on = maybe False ((== nextColour mycolour).fst) (board!on)
 
 	move_targets :: Colour -> [Coors]
-	move_targets colour_to_move = [ coors | (from,Just (colour,piecetype)) <- assocs board,
+	move_targets colour_to_move = [ move | (from,Just (colour,piecetype)) <- assocs board,
 		colour==colour_to_move,
-		targets <- dir_targets from 
-		case (piecetype,from) of
-			(Pawn,(f,r)) -> (pawn_dir,Nothing,[pawn_dir]) :
-				(if r == pawn_initial_file then [(pawn_dir*2,Nothing,[pawn_dir,pawn_dir*2])] else []) ++
+		targets <- concatMap (dir_targets from) $ case (piecetype,from) of
+			(Pawn,(f,r)) -> (pawn_dir,if r==pawn_initial_file then 2 else 1)
+				(if r==pawn_initial_file then [(pawn_dir*2,Nothing,[pawn_dir,pawn_dir*2])] else []) ++
 				[ (pawn_dir+hor,Just (pawn_dir+hor),[]) | hor <- [east,west], can_take_rel (pawn_dir+hor) ] ++
 				[ (pawn_dir+hor,Just hor,[]) | hor <- [east,west], can_take_rel hor,
 					((Move last_from last_to Nothing Nothing):_) <- [reverse moves],
@@ -134,21 +134,24 @@ moveGenerator position@(Position moves board colour_to_move) = [ Move from to mb
 			Queen  -> move_targets Bishop ++ move_targets Rook
 			King   -> map (,[]) $ diagonal++straight
 		]
+
 		where
 
-		dir_targets _ (_,0) = []
-		dir_targets from (direction,i) = case addrelcoors from direction of
+		(pawn_dir,pawn_initial_file) = if colour_to_move==White then (north,2) else (south,7)
+
+		dir_targets _ _ _ (_,0) = []
+		dir_targets from (moves,takes,direction,i) = case addrelcoors from direction of
 			Nothing    -> []
 			Just coors -> case board!coors of
-				Just (colour,_) -> if colour == nextColour colour_to_move then [coors] else []
-				Nothing -> coors : dir_targets coors (direction,i-1)
+				Just (colour,_) -> if colour == nextColour colour_to_move && takes then [coors] else []
+				Nothing -> (if moves then [coors] else []) ++ dir_targets coors (moves,takes,direction,i-1)
 
+		straight@[south,north,east,west] = [(0,-1),(0,1),(1,0),(-1,0)]
+		diagonal = [ north+east,north+west,south+east,south+west ]
 
-	straight@[south,north,east,west] = [(0,-1),(0,1),(1,0),(-1,0)]
-	diagonal = [ north+east,north+west,south+east,south+west ]
-	addrelcoors (file,rank) (dx,dy) = case ( file + dx, rank + dy ) of
-		(x,y) | x `elem` [1..8] && y `elem` [1..8] -> Just (x,y)
-		_ -> Nothing
+		addrelcoors (file,rank) (dx,dy) = case ( file + dx, rank + dy ) of
+			(x,y) | x `elem` [1..8] && y `elem` [1..8] -> Just (x,y)
+			_ -> Nothing
 
 putStrConsoleLn s = do
 	putStrLn s
