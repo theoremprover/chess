@@ -119,6 +119,15 @@ moveGenerator position@(Position moves board colour_to_move) = [ Move from to mb
 	move_targets colour_to_move = [ move | (from,Just (colour,piecetype)) <- assocs board,
 		colour==colour_to_move,
 		targets <- concatMap (dir_targets from) $ case (piecetype,from) of
+			(Pawn,(f,r)) -> (pawn_dir,if r==pawn_initial_file then 2 else 1) :
+			(Knight,_) -> map (,1) [
+				north*2+east,north*2+west,east*2+north,east*2+south,
+				south*2+east,south*2+west,west*2+north,west*2+south ]
+			(Bishop,_) -> map (,7) diagonal
+			(Rook,_)   -> map (,7) straight
+			(Queen,_)  -> map (,7) straight++diagonal
+			(King,_)   -> map (,1) straight++diagonal
+
 			(Pawn,(f,r)) -> (pawn_dir,if r==pawn_initial_file then 2 else 1)
 				(if r==pawn_initial_file then [(pawn_dir*2,Nothing,[pawn_dir,pawn_dir*2])] else []) ++
 				[ (pawn_dir+hor,Just (pawn_dir+hor),[]) | hor <- [east,west], can_take_rel (pawn_dir+hor) ] ++
@@ -139,12 +148,12 @@ moveGenerator position@(Position moves board colour_to_move) = [ Move from to mb
 
 		(pawn_dir,pawn_initial_file) = if colour_to_move==White then (north,2) else (south,7)
 
-		dir_targets _ _ _ (_,0) = []
-		dir_targets from (moves,takes,direction,i) = case addrelcoors from direction of
+		dir_targets _ (_,0) = []
+		dir_targets from (direction,i) = case addrelcoors from direction of
 			Nothing    -> []
 			Just coors -> case board!coors of
-				Just (colour,_) -> if colour == nextColour colour_to_move && takes then [coors] else []
-				Nothing -> (if moves then [coors] else []) ++ dir_targets coors (moves,takes,direction,i-1)
+				Just (colour,_) -> if colour == nextColour colour_to_move then [Right coors] else []
+				Nothing -> (Left coors) : dir_targets coors (moves,takes,direction,i-1)
 
 		straight@[south,north,east,west] = [(0,-1),(0,1),(1,0),(-1,0)]
 		diagonal = [ north+east,north+west,south+east,south+west ]
