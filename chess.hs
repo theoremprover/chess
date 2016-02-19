@@ -115,19 +115,27 @@ moveGenerator position@(Position moves board colour_to_move) = [ Move from to mb
 
 	--can_take mycolour on = maybe False ((== nextColour mycolour).fst) (board!on)
 
-	move_targets :: Colour -> [Coors]
-	move_targets colour_to_move = [ move | (from,Just (colour,piecetype)) <- assocs board,
+	move_targets :: Position -> [Coors]
+	move_targets (Position moves board colour_to_move) = [ move | (from,Just (colour,piecetype)) <- assocs board,
 		colour==colour_to_move,
-		targets <- concatMap (dir_targets from) $ case (piecetype,from) of
-			(Pawn,(f,r)) -> (pawn_dir,if r==pawn_initial_file then 2 else 1) :
-			(Knight,_) -> map (,1) [
-				north*2+east,north*2+west,east*2+north,east*2+south,
-				south*2+east,south*2+west,west*2+north,west*2+south ]
-			(Bishop,_) -> map (,7) diagonal
-			(Rook,_)   -> map (,7) straight
-			(Queen,_)  -> map (,7) straight++diagonal
-			(King,_)   -> map (,1) straight++diagonal
+		targets <- case (piecetype,from) of
+			(Pawn,(f,r)) ->
+				filter (isNothing.snd) (dir_targets (pawn_dir,if r==pawn_initial_file then 2 else 1)) ++
+				filter (isJust.snd) (concatMap $ dir_targets [(pawn_dir+west,1),(pawn_dir+east,1)]) ++
+				[ (pawn_dir+eastwest,Just take) | if , eastwest <- [east,west],
+					Just takecoors <- addrelcoors from eastwest, Just (col,Pawn) <- board!takecoors,
+					col == nextColour colour_to_move,
+					(Move last_from last_to _ _):_ <- reverse moves,
+			_ -> concatMap (dir_targets from) $ case piecetype of
+				Knight -> map (,1) [
+					north*2+east,north*2+west,east*2+north,east*2+south,
+					south*2+east,south*2+west,west*2+north,west*2+south ]
+				Bishop -> map (,7) diagonal
+				Rook   -> map (,7) straight
+				Queen  -> map (,7) straight++diagonal
+				King   -> map (,1) straight++diagonal
 
+{-
 			(Pawn,(f,r)) -> (pawn_dir,if r==pawn_initial_file then 2 else 1)
 				(if r==pawn_initial_file then [(pawn_dir*2,Nothing,[pawn_dir,pawn_dir*2])] else []) ++
 				[ (pawn_dir+hor,Just (pawn_dir+hor),[]) | hor <- [east,west], can_take_rel (pawn_dir+hor) ] ++
@@ -142,6 +150,7 @@ moveGenerator position@(Position moves board colour_to_move) = [ Move from to mb
 			Rook   -> [ (s*(l,l), [ s*(i,i) | i <- [1..(l-1)] ]) | s <- straight, l <- [1..7] ]
 			Queen  -> move_targets Bishop ++ move_targets Rook
 			King   -> map (,[]) $ diagonal++straight
+-}
 		]
 
 		where
@@ -152,8 +161,8 @@ moveGenerator position@(Position moves board colour_to_move) = [ Move from to mb
 		dir_targets from (direction,i) = case addrelcoors from direction of
 			Nothing    -> []
 			Just coors -> case board!coors of
-				Just (colour,_) -> if colour == nextColour colour_to_move then [Right coors] else []
-				Nothing -> (Left coors) : dir_targets coors (moves,takes,direction,i-1)
+				Just (colour,_) -> if colour == nextColour colour_to_move then [(coors,Just coors)] else []
+				Nothing -> (coors,Nothing) : dir_targets coors (direction,i-1)
 
 		straight@[south,north,east,west] = [(0,-1),(0,1),(1,0),(-1,0)]
 		diagonal = [ north+east,north+west,south+east,south+west ]
