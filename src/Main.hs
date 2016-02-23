@@ -65,11 +65,27 @@ moveGenerator position@(Position moves board colour_to_move) = [ Move from to mb
 	mb_promotion <- case (piecetype,to) of
 		(Pawn,(_,r)) | r == 10 - pawn_initial_rank -> map Just [Knight,Bishop,Rook,Queen]
 		_ -> [Nothing] ] ++
-	[ Move from to Nothing Nothing |
-		
+	( case map ((board!).(,castle_rank)) [5..8] of
+		[ Just (kingcol,King),Nothing,Nothing,Just (rookcol,Rook) ] |
+			kingcol==colour_to_move && rookcol==colour_to_move &&
+			all no_check (map (,castle_rank) [5..7]) &&
+			all (\ (Move f _ _ _) -> f /= (5,castle_rank) && f /= (8,castle_rank)) moves ->
+				[ Move (5,castle_rank) (7,castle_rank) Nothing Nothing ]
+		_ -> [] ) ++
+	( case map ((board!).(,castle_rank)) [1..5] of
+		[ Just (rookcol,Rook),Nothing,Nothing,Nothing,Just (kingcol,King) ] |
+			kingcol==colour_to_move && rookcol==colour_to_move &&
+			all no_check (map (,castle_rank) [3..5]) &&
+			all (\ (Move f _ _ _) -> f /= (1,castle_rank) && f /= (5,castle_rank)) moves ->
+				[ Move (5,castle_rank) (3,castle_rank) Nothing Nothing ]
+		_ -> [] )
+
 	where
 
-	castle_rank = if 
+	castle_rank = if colour_to_move==White then 1 else 8
+
+	no_check coors = all (\ (_,_,(to,_)) -> coors /= to) $
+		move_targets (Position moves board (nextColour colour_to_move))
 
 	move_targets :: Position -> [(PieceType,Coors,(Coors,Maybe Coors))]
 	move_targets (Position moves board colour_to_move) = [ (piecetype,from,target) | (from,Just (colour,piecetype)) <- assocs board,
@@ -89,7 +105,7 @@ moveGenerator position@(Position moves board colour_to_move) = [ Move from to mb
 				Bishop -> map (,7) diagonal
 				Rook   -> map (,7) straight
 				Queen  -> map (,7) straight++diagonal
-				King   -> map (,1) straight++diagonal
+				King   -> map (,1) straight++diagonal ]
 
 	(pawn_dir,pawn_initial_rank) = if colour_to_move==White then (north,2) else (south,7)
 
