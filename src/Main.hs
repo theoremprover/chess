@@ -38,7 +38,8 @@ initialBoard = array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] 
 	w = Just . (White,)
 	b = Just . (Black,)
 
-data Position = Position [Move] Board Colour
+data Position = Position {
+	positionMoves :: [Move], positionBoard::Board, positionColourToMove::Colour }
 initialPosition = Position [] initialBoard White
 
 data Move = Move {
@@ -60,35 +61,37 @@ doMove (Position moves board colour) move@(Move from to mb_take mb_promotion) =
 			_ -> [] ))
 		(nextColour colour)
 
-moveGenerator position@(Position moves board colour_to_move) = [ Move from to mb_take mb_promotion |
-	(piecetype,(from,(to,mb_take))) <- move_targets position,
-	mb_promotion <- case (piecetype,to) of
-		(Pawn,(_,r)) | r == 10 - pawn_initial_rank -> map Just [Knight,Bishop,Rook,Queen]
-		_ -> [Nothing] ] ++
-	( case map ((board!).(,castle_rank)) [5..8] of
-		[ Just (kingcol,King),Nothing,Nothing,Just (rookcol,Rook) ] |
-			kingcol==colour_to_move && rookcol==colour_to_move &&
-			all no_check (map (,castle_rank) [5..7]) &&
-			all (\ (Move f _ _ _) -> f /= (5,castle_rank) && f /= (8,castle_rank)) moves ->
-				[ Move (5,castle_rank) (7,castle_rank) Nothing Nothing ]
-		_ -> [] ) ++
-	( case map ((board!).(,castle_rank)) [1..5] of
-		[ Just (rookcol,Rook),Nothing,Nothing,Nothing,Just (kingcol,King) ] |
-			kingcol==colour_to_move && rookcol==colour_to_move &&
-			all no_check (map (,castle_rank) [3..5]) &&
-			all (\ (Move f _ _ _) -> f /= (1,castle_rank) && f /= (5,castle_rank)) moves ->
-				[ Move (5,castle_rank) (3,castle_rank) Nothing Nothing ]
-		_ -> [] )
+moveGenerator position@(Position moves board colour_to_move) = filter king_no_check $
+	[ Move from to mb_take mb_promotion |
+		(piecetype,(from,(to,mb_take))) <- move_targets position,
+		mb_promotion <- case (piecetype,to) of
+			(Pawn,(_,r)) | r == 10 - pawn_initial_rank -> map Just [Knight,Bishop,Rook,Queen]
+			_ -> [Nothing] ] ++
+		( case map ((board!).(,castle_rank)) [5..8] of
+			[ Just (kingcol,King),Nothing,Nothing,Just (rookcol,Rook) ] |
+				kingcol==colour_to_move && rookcol==colour_to_move &&
+				all (no_check position) (map (,castle_rank) [5..6]) &&
+				all (\ (Move f _ _ _) -> f /= (5,castle_rank) && f /= (8,castle_rank)) moves ->
+					[ Move (5,castle_rank) (7,castle_rank) Nothing Nothing ]
+			_ -> [] ) ++
+		( case map ((board!).(,castle_rank)) [1..5] of
+			[ Just (rookcol,Rook),Nothing,Nothing,Nothing,Just (kingcol,King) ] |
+				kingcol==colour_to_move && rookcol==colour_to_move &&
+				all (no_check position) (map (,castle_rank) [4..5]) &&
+				all (\ (Move f _ _ _) -> f /= (1,castle_rank) && f /= (5,castle_rank)) moves ->
+					[ Move (5,castle_rank) (3,castle_rank) Nothing Nothing ]
+			_ -> [] )
 
 	where
 
+	king_no_check move = no_check ((doMove position move) { positionColourToMove = nextColour colour_to_move }) 
 	castle_rank = if colour_to_move==White then 1 else 8
 
-	no_check coors = all (\ (_,(_,(to,_))) -> coors /= to) $
-		move_targets (Position moves board (nextColour colour_to_move))
+	no_check pos coors = all (\ (_,(_,(to,_))) -> coors /= to) $
+		move_targets (pos { positionColourToMove = nextColour colour_to_move })
 
 	move_targets :: Position -> [(PieceType,(Coors,(Coors,Maybe Coors)))]
-	move_targets (Position moves board colour_to_move) = [ (piecetype,(from,target)) |
+	move_targets position@(Position moves board colour_to_move) = [ (piecetype,(from,target)) |
 		(from,Just (colour,piecetype)) <- assocs board,
 		colour==colour_to_move,
 		target <- case (piecetype,from) of
@@ -98,7 +101,8 @@ moveGenerator position@(Position moves board colour_to_move) = [ Move from to mb
 				[ (pawn_dir+eastwest,Just take) | r == 9 - pawn_initial_rank, eastwest <- [east,west],
 					Just take <- [ addrelcoors from eastwest ],
 					Just (col,Pawn) <- [ board!take ],
-					(Move last_from last_to _ _):_ <- [ reverse moves ], last_from==(
+					Just pawn_from <- [ addrelcoors from (pawn_dir*2+eastwest) ],
+					(Move last_from last_to _ _):_ <- [ reverse moves ], last_from==pawn_from, last_to==take,
 					col == nextColour colour_to_move ]
 			_ -> concatMap (dir_targets from) $ case piecetype of
 				Knight -> map (,1) [
@@ -162,12 +166,13 @@ main = do
 step _ [] = return ()
 step position (move:left_moves)= do
 	putStrConsoleLn "=================================="
-	putStrConsoleLn $ show move
-	let pos' = doMove position move
-	showPos pos'
+	putStrConsoleLn $ "After " ++ show move ++ ":"
+	showPos (doMove position move)
 	s <- getLine
 	case s of
 		""  -> step position left_moves
-		"m" -> step (doMove position move) left_moves
+		"m" -> do
+			let pos' = doMove position move
+			step pos' (moveGenerator pos')
 		"b" -> return ()
 
