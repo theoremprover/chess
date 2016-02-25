@@ -104,11 +104,12 @@ moveGenerator position@(Position moves board colour_to_move) = [ Move from to mb
 					south*2+east,south*2+west,west*2+north,west*2+south ]
 				Bishop -> map (,7) diagonal
 				Rook   -> map (,7) straight
-				Queen  -> map (,7) straight++diagonal
-				King   -> map (,1) straight++diagonal ]
+				Queen  -> map (,7) (straight++diagonal)
+				King   -> map (,1) (straight++diagonal) ]
 
 	(pawn_dir,pawn_initial_rank) = if colour_to_move==White then (north,2) else (south,7)
 
+	dir_targets :: Coors -> (Coors,Int)
 	dir_targets _ (_,0) = []
 	dir_targets from (direction,i) = case addrelcoors from direction of
 		Nothing    -> []
