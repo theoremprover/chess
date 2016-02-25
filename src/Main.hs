@@ -61,7 +61,7 @@ doMove (Position moves board colour) move@(Move from to mb_take mb_promotion) =
 		(nextColour colour)
 
 moveGenerator position@(Position moves board colour_to_move) = [ Move from to mb_take mb_promotion |
-	(piecetype,from,(to,mb_take)) <- move_targets position,
+	(piecetype,(from,(to,mb_take))) <- move_targets position,
 	mb_promotion <- case (piecetype,to) of
 		(Pawn,(_,r)) | r == 10 - pawn_initial_rank -> map Just [Knight,Bishop,Rook,Queen]
 		_ -> [Nothing] ] ++
@@ -84,20 +84,22 @@ moveGenerator position@(Position moves board colour_to_move) = [ Move from to mb
 
 	castle_rank = if colour_to_move==White then 1 else 8
 
-	no_check coors = all (\ (_,_,(to,_)) -> coors /= to) $
+	no_check coors = all (\ (_,(_,(to,_))) -> coors /= to) $
 		move_targets (Position moves board (nextColour colour_to_move))
 
-	move_targets :: Position -> [(PieceType,Coors,(Coors,Maybe Coors))]
-	move_targets (Position moves board colour_to_move) = [ (piecetype,from,target) | (from,Just (colour,piecetype)) <- assocs board,
+	move_targets :: Position -> [(PieceType,(Coors,(Coors,Maybe Coors)))]
+	move_targets (Position moves board colour_to_move) = [ (piecetype,(from,target)) |
+		(from,Just (colour,piecetype)) <- assocs board,
 		colour==colour_to_move,
 		target <- case (piecetype,from) of
-			(Pawn,(f,r)) ->
-				filter (isNothing.snd) (dir_targets (pawn_dir,if r==pawn_initial_rank then 2 else 1)) ++
-				filter (isJust.snd) (concatMap $ dir_targets [(pawn_dir+west,1),(pawn_dir+east,1)]) ++
+			(Pawn,(_,r)) ->
+				filter (isNothing.snd) (dir_targets from (pawn_dir,if r==pawn_initial_rank then 2 else 1)) ++
+				filter (isJust.snd) (concatMap (dir_targets from) [(pawn_dir+west,1),(pawn_dir+east,1)]) ++
 				[ (pawn_dir+eastwest,Just take) | r == 9 - pawn_initial_rank, eastwest <- [east,west],
-					Just takecoors <- addrelcoors from eastwest, Just (col,Pawn) <- board!takecoors,
-					col == nextColour colour_to_move,
-					(Move last_from last_to _ _):_ <- reverse moves ]
+					Just take <- [ addrelcoors from eastwest ],
+					Just (col,Pawn) <- [ board!take ],
+					(Move last_from last_to _ _):_ <- [ reverse moves ], last_from==(
+					col == nextColour colour_to_move ]
 			_ -> concatMap (dir_targets from) $ case piecetype of
 				Knight -> map (,1) [
 					north*2+east,north*2+west,east*2+north,east*2+south,
@@ -109,7 +111,7 @@ moveGenerator position@(Position moves board colour_to_move) = [ Move from to mb
 
 	(pawn_dir,pawn_initial_rank) = if colour_to_move==White then (north,2) else (south,7)
 
-	dir_targets :: Coors -> (Coors,Int)
+	dir_targets :: Coors -> (Coors,Int) -> [(Coors,Maybe Coors)]
 	dir_targets _ (_,0) = []
 	dir_targets from (direction,i) = case addrelcoors from direction of
 		Nothing    -> []
