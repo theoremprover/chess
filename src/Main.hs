@@ -84,7 +84,9 @@ moveGenerator position@(Position moves board colour_to_move) = filter king_no_ch
 
 	where
 
-	king_no_check move = no_check ((doMove position move) { positionColourToMove = nextColour colour_to_move }) 
+	king_no_check move = no_check (doMove position move) $
+		head [ coors | (coors,Just (col,King)) <- assocs board, col==colour_to_move ]
+
 	castle_rank = if colour_to_move==White then 1 else 8
 
 	no_check pos coors = all (\ (_,(_,(to,_))) -> coors /= to) $
@@ -146,7 +148,7 @@ showPos (Position moves board colour) = do
 	putStrConsoleLn $ show colour ++ " to move"
 
 testPosition = Position [] (array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] [
-	Nothing,Nothing ,Nothing ,Nothing,b King, Nothing ,Nothing ,b Rook ,
+	Nothing,Nothing ,Nothing ,Nothing,b King, b Rook  ,Nothing ,w Rook ,
 	Nothing,b Pawn  ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
 	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
 	w Pawn ,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
