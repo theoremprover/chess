@@ -84,10 +84,10 @@ moveGenerator position@(Position moves board colour_to_move) = filter king_no_ch
 
 	where
 
-	king_no_check move = no_check (pos' { positionColourToMove = colour_to_move }) $
-		head [ coors | (coors,Just (col,King)) <- assocs (positionBoard pos'), col==colour_to_move ]
+	king_no_check move = all [ no_check pos' coors |
+		(coors,Just (col,King)) <- assocs (positionBoard pos'), col==colour_to_move ]
 		where
-		pos' = doMove position move
+		pos' = (doMove position move) { positionColourToMove = colour_to_move }
 
 	castle_rank = if colour_to_move==White then 1 else 8
 
