@@ -84,13 +84,16 @@ moveGenerator position@(Position moves board colour_to_move) = filter king_no_ch
 
 	where
 
-	king_no_check move = no_check (doMove position move) $
-		head [ coors | (coors,Just (col,King)) <- assocs board, col==colour_to_move ]
+	king_no_check move = no_check (pos' { positionColourToMove = colour_to_move }) $
+		head [ coors | (coors,Just (col,King)) <- assocs (positionBoard pos'), col==colour_to_move ]
+		where
+		pos' = doMove position move
 
 	castle_rank = if colour_to_move==White then 1 else 8
 
+	-- checks if the next player in this position could check the square
 	no_check pos coors = all (\ (_,(_,(to,_))) -> coors /= to) $
-		move_targets (pos { positionColourToMove = nextColour colour_to_move })
+		move_targets (pos { positionColourToMove = nextColour (positionColourToMove pos) })
 
 	move_targets :: Position -> [(PieceType,(Coors,(Coors,Maybe Coors)))]
 	move_targets position@(Position moves board colour_to_move) = [ (piecetype,(from,target)) |
