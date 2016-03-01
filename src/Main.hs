@@ -84,14 +84,13 @@ moveGenerator position@(Position moves board colour_to_move) = filter king_no_ch
 
 	where
 
-	king_no_check move = all [ no_check pos' coors |
+	king_no_check move = all (no_check pos') [ coors |
 		(coors,Just (col,King)) <- assocs (positionBoard pos'), col==colour_to_move ]
 		where
 		pos' = (doMove position move) { positionColourToMove = colour_to_move }
 
 	castle_rank = if colour_to_move==White then 1 else 8
 
-	-- checks if the next player in this position could check the square
 	no_check pos coors = all (\ (_,(_,(to,_))) -> coors /= to) $
 		move_targets (pos { positionColourToMove = nextColour (positionColourToMove pos) })
 
@@ -134,6 +133,12 @@ moveGenerator position@(Position moves board colour_to_move) = filter king_no_ch
 	addrelcoors (file,rank) (dx,dy) = case ( file + dx, rank + dy ) of
 		(x,y) | x `elem` [1..8] && y `elem` [1..8] -> Just (x,y)
 		_ -> Nothing
+
+ratePosition Position{..} = 
+	positionBoard
+	where
+	pieceVal (colour,piecetype) pos = case colour == positionColourToMove of
+		True ->
 
 putStrConsoleLn s = do
 	putStrLn s
