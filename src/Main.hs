@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections,ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections,ScopedTypeVariables,RecordWildCards #-}
 
 module Main where
 
@@ -135,10 +135,19 @@ moveGenerator position@(Position moves board colour_to_move) = filter king_no_ch
 		_ -> Nothing
 
 ratePosition Position{..} = 
-	positionBoard
+	sum [ piece_val (coors,piece) | (coors,Just piece) <- assocs positionBoard ]
 	where
-	pieceVal (colour,piecetype) pos = case colour == positionColourToMove of
-		True ->
+	piece_val (coors@(f,r),(colour,piecetype)) pos = (if colour == White then 1.0 else -1.0) *
+		case piecetype of
+			Pawn   -> 1.0 + 0.1 * fromIntegral (6 - abs (r-pawn_targetrank))
+			Knight -> 3.0 + 0.1 * proximity_to_centre
+			Bishop -> 3.0 + 0.1 * proximity_to_centre
+			Rook   -> 5.0
+			Queen  -> 9.0 + 0.1 * proximity_to_centre
+			King   -> 10000.0
+		where
+		pawn_targetrank = if colour==White then 8 else 1
+		proximity_to_centre = 5 - sqrt $ (abs (4.5 - fromIntegral r))^2 + (abs (4.5 - fromIntegral f))^2
 
 putStrConsoleLn s = do
 	putStrLn s
