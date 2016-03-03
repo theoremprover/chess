@@ -86,7 +86,8 @@ moveGenerator position@(Position moves board colour_to_move) = case ( filter kin
 					[ Move (5,castle_rank) (3,castle_rank) Nothing Nothing ]
 			_ -> [] ) )
 	of
-	[] -> 
+	[] -> ...
+	moves -> moves
 
 	where
 
