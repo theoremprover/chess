@@ -62,7 +62,10 @@ doMove (Position moves board colour) move@(Move from to mb_take mb_promotion) =
 			_ -> [] ))
 		(nextColour colour)
 
-moveGenerator position@(Position moves board colour_to_move) = filter king_no_check $
+data MatchEnding = Mate Colour | Stalemate Colour | Remis | MoveRepetition
+	deriving (Eq,Show)
+
+moveGenerator position@(Position moves board colour_to_move) = case ( filter king_no_check $
 	[ Move from to mb_take mb_promotion |
 		(piecetype,(from,(to,mb_take))) <- move_targets position,
 		mb_promotion <- case (piecetype,to) of
@@ -81,12 +84,13 @@ moveGenerator position@(Position moves board colour_to_move) = filter king_no_ch
 				all (no_check position) (map (,castle_rank) [4..5]) &&
 				all (\ (Move f _ _ _) -> f /= (1,castle_rank) && f /= (5,castle_rank)) moves ->
 					[ Move (5,castle_rank) (3,castle_rank) Nothing Nothing ]
-			_ -> [] )
+			_ -> [] ) )
+	of
+	[] -> 
 
 	where
 
-	king_no_check move = all (no_check pos') [ coors |
-		(coors,Just (col,King)) <- assocs (positionBoard pos'), col==colour_to_move ]
+	king_no_check move = no_check pos' (kingsCoors pos')
 		where
 		pos' = (doMove position move) { positionColourToMove = colour_to_move }
 
@@ -135,23 +139,30 @@ moveGenerator position@(Position moves board colour_to_move) = filter king_no_ch
 		(x,y) | x `elem` [1..8] && y `elem` [1..8] -> Just (x,y)
 		_ -> Nothing
 
+kingsCoors Position{..} = head [ coors |
+		(coors,Just (col,King)) <- assocs positionBoard, col==positionColourToMove ]
+
+MAX_RATING = 1000000.0 :: Float
+
 evalPosition :: Position -> Float
-evalPosition pos@Position{..} = 
-	sum [ piece_val (coors,piece) | (coors,Just piece) <- assocs positionBoard ]
-	where
-	move_froms = map moveFrom $ moveGenerator pos
-	piece_val (coors@(f,r),(colour,piecetype)) = (if colour == White then id else negate) (
-		fromIntegral (length (filter (==coors) move_froms)) + 
-		case piecetype of
-			Pawn   -> 1.0 + 0.1 * fromIntegral (6 - abs (r-pawn_targetrank))
-			Knight -> 3.0 + 0.1 * proximity_to_centre
-			Bishop -> 3.0 + 0.1 * proximity_to_centre
-			Rook   -> 5.0
-			Queen  -> 9.0 + 0.1 * proximity_to_centre
-			King   -> 10000.0)
+evalPosition pos@Position{..} = case moveGenerator pos of
+	Left ending -> case ending of
+		Mate colour -> (if colour==White then negate else id) MAX_RATING
+		_ -> 0.0
+	Right moves -> sum [ piece_val (coors,piece) | (coors,Just piece) <- assocs positionBoard ]
 		where
-		pawn_targetrank = if colour==White then 8 else 1
-		proximity_to_centre = 5.0 - sqrt $ (abs (4.5 - fromIntegral r))^2 + (abs (4.5 - fromIntegral f))^2
+		piece_val (coors@(f,r),(colour,piecetype)) = (if colour == White then id else negate) (
+			case piecetype of
+				Pawn   -> 1.0 + 0.1 * fromIntegral (6 - abs (r-pawn_targetrank)) + 0.10*num_moves
+				Knight -> 3.0 + 0.10*proximity_to_centre +                         0.04*num_moves
+				Bishop -> 3.0 + 0.10*proximity_to_centre +                         0.02*num_moves
+				Rook   -> 5.0 +                                                    0.02*num_moves
+				Queen  -> 9.0 + 0.10*proximity_to_centre +                         0.01*num_moves
+				King   -> 10000.0 )
+			where
+			num_moves = fromIntegral (length (filter (==coors) $ map moveFrom moves))
+			pawn_targetrank = if colour==White then 8 else 1
+			proximity_to_centre = 5.0 - sqrt $ (abs (4.5 - fromIntegral r))^2 + (abs (4.5 - fromIntegral f))^2
 
 putStrConsoleLn s = do
 	putStrLn s
@@ -193,9 +204,19 @@ step position (move:left_moves)= do
 	let pos' = doMove position move
 	showPos pos'
 	putStrConsoleLn $ printf "Rating = %+.3f" (evalPosition pos')
-	s <- getLine
-	case s of
-		""  -> step position left_moves
-		"m" -> step pos' (moveGenerator pos')
-		"b" -> return ()
+	case moveGenerator pos' of
+		Left ending -> do
+			putStrConsoleLn ending
+			putStrConsoleLn "Press ENTER to go back"
+			getLine
+			return ()
+		Right moves -> do
+			s <- getLine
+			case s of
+				""  -> step position left_moves
+				"m" -> do
+					step pos' moves
+				"b" -> return ()
 
+search depth position = do
+	
