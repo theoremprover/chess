@@ -4,7 +4,7 @@ module Main where
 
 import Data.Array
 import Data.Maybe
---import Data.NumInstances
+import Data.List
 import Control.Monad
 import Text.Printf
 
@@ -20,7 +20,7 @@ nextColour Black = White
 coloursToMove = iterate nextColour White
 
 data PieceType = Pawn | Knight | Bishop | Rook | Queen | King
-	deriving (Show,Eq,Enum)
+	deriving (Show,Eq,Enum,Ord)
 
 type Piece = (Colour,PieceType)
 
@@ -62,36 +62,44 @@ doMove (Position moves board colour) move@(Move from to mb_take mb_promotion) =
 			_ -> [] ))
 		(nextColour colour)
 
-data MatchEnding = Mate Colour | Stalemate Colour | Remis | MoveRepetition
+data MatchEnding = Checkmate Colour | Stalemate Colour | Remis | MoveRepetition
 	deriving (Eq,Show)
 
-moveGenerator position@(Position moves board colour_to_move) = case ( filter king_no_check $
-	[ Move from to mb_take mb_promotion |
-		(piecetype,(from,(to,mb_take))) <- move_targets position,
-		mb_promotion <- case (piecetype,to) of
-			(Pawn,(_,r)) | r == 10 - pawn_initial_rank -> map Just [Knight,Bishop,Rook,Queen]
-			_ -> [Nothing] ] ++
-		( case map ((board!).(,castle_rank)) [5..8] of
-			[ Just (kingcol,King),Nothing,Nothing,Just (rookcol,Rook) ] |
-				kingcol==colour_to_move && rookcol==colour_to_move &&
-				all (no_check position) (map (,castle_rank) [5..6]) &&
-				all (\ (Move f _ _ _) -> f /= (5,castle_rank) && f /= (8,castle_rank)) moves ->
-					[ Move (5,castle_rank) (7,castle_rank) Nothing Nothing ]
-			_ -> [] ) ++
-		( case map ((board!).(,castle_rank)) [1..5] of
-			[ Just (rookcol,Rook),Nothing,Nothing,Nothing,Just (kingcol,King) ] |
-				kingcol==colour_to_move && rookcol==colour_to_move &&
-				all (no_check position) (map (,castle_rank) [4..5]) &&
-				all (\ (Move f _ _ _) -> f /= (1,castle_rank) && f /= (5,castle_rank)) moves ->
-					[ Move (5,castle_rank) (3,castle_rank) Nothing Nothing ]
-			_ -> [] ) )
-	of
-	[] -> ...
-	moves -> moves
+moveGenerator :: Position -> Either MatchEnding [Move]
+moveGenerator position@(Position moves board colour_to_move) = case sort $ map snd (catMaybes $ elems board) of
+	[ King,King ]        -> Left Remis
+	[ Bishop,King,King ] -> Left Remis
+	[ Knight,King,King ] -> Left Remis
+	_ -> case filter king_no_check $ [ Move from to mb_take mb_promotion |
+			(piecetype,(from,(to,mb_take))) <- move_targets position,
+			mb_promotion <- case (piecetype,to) of
+				(Pawn,(_,r)) | r == 10 - pawn_initial_rank -> map Just [Knight,Bishop,Rook,Queen]
+				_ -> [Nothing] ] ++
+			( case map ((board!).(,castle_rank)) [5..8] of
+				[ Just (kingcol,King),Nothing,Nothing,Just (rookcol,Rook) ] |
+					kingcol==colour_to_move && rookcol==colour_to_move &&
+					all (no_check position) (map (,castle_rank) [5..6]) &&
+					all (\ (Move f _ _ _) -> f /= (5,castle_rank) && f /= (8,castle_rank)) moves ->
+						[ Move (5,castle_rank) (7,castle_rank) Nothing Nothing ]
+				_ -> [] ) ++
+			( case map ((board!).(,castle_rank)) [1..5] of
+				[ Just (rookcol,Rook),Nothing,Nothing,Nothing,Just (kingcol,King) ] |
+					kingcol==colour_to_move && rookcol==colour_to_move &&
+					all (no_check position) (map (,castle_rank) [4..5]) &&
+					all (\ (Move f _ _ _) -> f /= (1,castle_rank) && f /= (5,castle_rank)) moves ->
+						[ Move (5,castle_rank) (3,castle_rank) Nothing Nothing ]
+				_ -> [] )
+		of
+		[] -> Left $ case no_check position kings_coors of
+			True  -> Stalemate colour_to_move
+			False -> Checkmate colour_to_move
+		moves -> Right moves
 
 	where
 
-	king_no_check move = no_check pos' (kingsCoors pos')
+	kings_coors = head [ coors | (coors,Just (col,King)) <- assocs board, col==colour_to_move ]
+
+	king_no_check move = no_check pos' kings_coors
 		where
 		pos' = (doMove position move) { positionColourToMove = colour_to_move }
 
@@ -140,16 +148,13 @@ moveGenerator position@(Position moves board colour_to_move) = case ( filter kin
 		(x,y) | x `elem` [1..8] && y `elem` [1..8] -> Just (x,y)
 		_ -> Nothing
 
-kingsCoors Position{..} = head [ coors |
-		(coors,Just (col,King)) <- assocs positionBoard, col==positionColourToMove ]
-
-MAX_RATING = 1000000.0 :: Float
+mAX_RATING = 1000000.0 :: Float
 
 evalPosition :: Position -> Float
 evalPosition pos@Position{..} = case moveGenerator pos of
 	Left ending -> case ending of
-		Mate colour -> (if colour==White then negate else id) MAX_RATING
-		_ -> 0.0
+		Checkmate colour -> (if colour==White then negate else id) mAX_RATING
+		_                -> 0.0
 	Right moves -> sum [ piece_val (coors,piece) | (coors,Just piece) <- assocs positionBoard ]
 		where
 		piece_val (coors@(f,r),(colour,piecetype)) = (if colour == White then id else negate) (
@@ -159,7 +164,7 @@ evalPosition pos@Position{..} = case moveGenerator pos of
 				Bishop -> 3.0 + 0.10*proximity_to_centre +                         0.02*num_moves
 				Rook   -> 5.0 +                                                    0.02*num_moves
 				Queen  -> 9.0 + 0.10*proximity_to_centre +                         0.01*num_moves
-				King   -> 10000.0 )
+				King   -> 10000.0 ) :: Float
 			where
 			num_moves = fromIntegral (length (filter (==coors) $ map moveFrom moves))
 			pawn_targetrank = if colour==White then 8 else 1
@@ -196,7 +201,8 @@ testPosition = Position [] (array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f
 
 main = do
 --	writeFile "test.txt" ""
-	step testPosition (moveGenerator testPosition)
+	let Right moves = moveGenerator testPosition
+	step testPosition moves
 
 step _ [] = return ()
 step position (move:left_moves)= do
@@ -204,10 +210,10 @@ step position (move:left_moves)= do
 	putStrConsoleLn $ "After " ++ show move ++ ":"
 	let pos' = doMove position move
 	showPos pos'
-	putStrConsoleLn $ printf "Rating = %+.3f" (evalPosition pos')
+	putStrConsoleLn $ printf "Rating = %+.2f" (evalPosition pos')
 	case moveGenerator pos' of
 		Left ending -> do
-			putStrConsoleLn ending
+			putStrConsoleLn $ show ending
 			putStrConsoleLn "Press ENTER to go back"
 			getLine
 			return ()
@@ -218,6 +224,7 @@ step position (move:left_moves)= do
 				"m" -> do
 					step pos' moves
 				"b" -> return ()
+				"q" -> error $ "Quit."
 
-search depth position = do
+--search depth position = do
 	
