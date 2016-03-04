@@ -99,14 +99,12 @@ moveGenerator position@(Position moves board colour_to_move) = case sort $ map s
 
 	kings_coors = head [ coors | (coors,Just (col,King)) <- assocs board, col==colour_to_move ]
 
-	king_no_check move = no_check pos' kings_coors
-		where
-		pos' = (doMove position move) { positionColourToMove = colour_to_move }
+	king_no_check move = no_check (doMove position move) kings_coors
 
 	castle_rank = if colour_to_move==White then 1 else 8
 
 	no_check pos coors = all (\ (_,(_,(to,_))) -> coors /= to) $
-		move_targets (pos { positionColourToMove = nextColour (positionColourToMove pos) })
+		move_targets (pos { positionColourToMove = nextColour colour_to_move })
 
 	move_targets :: Position -> [(PieceType,(Coors,(Coors,Maybe Coors)))]
 	move_targets position@(Position moves board colour_to_move) = [ (piecetype,(from,target)) |
@@ -207,10 +205,11 @@ main = do
 step _ [] = return ()
 step position (move:left_moves)= do
 	putStrConsoleLn "=================================="
-	putStrConsoleLn $ "After " ++ show move ++ ":"
 	let pos' = doMove position move
+	putStrConsoleLn $ "After " ++ show (positionColourToMove position) ++ " move " ++ show move ++ ":"
 	showPos pos'
 	putStrConsoleLn $ printf "Rating = %+.2f" (evalPosition pos')
+	putStrLn $ "Now " ++ show (positionColourToMove pos')++ " to move"
 	case moveGenerator pos' of
 		Left ending -> do
 			putStrConsoleLn $ show ending
