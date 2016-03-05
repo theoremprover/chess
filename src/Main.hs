@@ -7,13 +7,16 @@ import Data.Maybe
 import Data.List
 import Control.Monad
 import Text.Printf
+import Data.NumInstances
+import Data.Tuple
+import Debug.Trace
 
 type File = Int
 type Rank = Int
 type Coors = (File,Rank)
 
 data Colour = White | Black
-	deriving (Eq,Show,Enum)
+	deriving (Eq,Show,Enum,Ord)
 
 nextColour White = Black
 nextColour Black = White
@@ -65,71 +68,75 @@ doMove (Position moves board colour) move@(Move from to mb_take mb_promotion) =
 data MatchEnding = Checkmate Colour | Stalemate Colour | Remis | MoveRepetition
 	deriving (Eq,Show)
 
+straight@[south,north,east,west] = [(0,-1),(0,1),(1,0),(-1,0)]
+diagonal = [ north+east,north+west,south+east,south+west ]
+
+pawnDir colour = if colour==White then north else south
+pawnInitialRank colour = if colour==White then 2 else 7
+
 moveGenerator :: Position -> Either MatchEnding [Move]
-moveGenerator position@(Position moves board colour_to_move) = case sort $ map snd (catMaybes $ elems board) of
-	[ King,King ]        -> Left Remis
-	[ Bishop,King,King ] -> Left Remis
-	[ Knight,King,King ] -> Left Remis
-	_ -> case filter king_no_check $ [ Move from to mb_take mb_promotion |
-			(piecetype,(from,(to,mb_take))) <- move_targets position,
-			mb_promotion <- case (piecetype,to) of
-				(Pawn,(_,r)) | r == 10 - pawn_initial_rank -> map Just [Knight,Bishop,Rook,Queen]
-				_ -> [Nothing] ] ++
-			( case map ((board!).(,castle_rank)) [5..8] of
-				[ Just (kingcol,King),Nothing,Nothing,Just (rookcol,Rook) ] |
-					kingcol==colour_to_move && rookcol==colour_to_move &&
-					all (no_check position) (map (,castle_rank) [5..6]) &&
-					all (\ (Move f _ _ _) -> f /= (5,castle_rank) && f /= (8,castle_rank)) moves ->
-						[ Move (5,castle_rank) (7,castle_rank) Nothing Nothing ]
-				_ -> [] ) ++
-			( case map ((board!).(,castle_rank)) [1..5] of
-				[ Just (rookcol,Rook),Nothing,Nothing,Nothing,Just (kingcol,King) ] |
-					kingcol==colour_to_move && rookcol==colour_to_move &&
-					all (no_check position) (map (,castle_rank) [4..5]) &&
-					all (\ (Move f _ _ _) -> f /= (1,castle_rank) && f /= (5,castle_rank)) moves ->
-						[ Move (5,castle_rank) (3,castle_rank) Nothing Nothing ]
-				_ -> [] )
-		of
-		[] -> Left $ case no_check position kings_coors of
-			True  -> Stalemate colour_to_move
-			False -> Checkmate colour_to_move
-		moves -> Right moves
+moveGenerator position@(Position moves board colour_to_move) =
+	case sort $ map swap $ catMaybes $ elems board of
+		[ (King,_),(King,_) ] -> Left Remis
+		[ (fig,_),(King,_),(King,_) ] | fig `elem` [Knight,Bishop] -> Left Remis
+		[ (fig1,col1),(fig2,col2),(King,_),(King,_) ] | col1 /= col2 &&
+			fig1 `elem` [Knight,Bishop] && fig2 `elem` [Knight,Bishop] -> Left Remis
+
+		_ -> case filter (king_no_check position) $ [ Move from to mb_take mb_promotion |
+				(piecetype,(from,(to,mb_take))) <- move_targets position,
+				mb_promotion <- case (piecetype,to) of
+					(Pawn,(_,r)) | r == 10 - pawnInitialRank colour_to_move -> map Just [Knight,Bishop,Rook,Queen]
+					_ -> [Nothing] ] ++
+				( case map ((board!).(,castle_rank)) [5..8] of
+					[ Just (kingcol,King),Nothing,Nothing,Just (rookcol,Rook) ] |
+						kingcol==colour_to_move && rookcol==colour_to_move &&
+						all (no_check position) (map (,castle_rank) [5..6]) &&
+						all (\ (Move f _ _ _) -> f /= (5,castle_rank) && f /= (8,castle_rank)) moves ->
+							[ Move (5,castle_rank) (7,castle_rank) Nothing Nothing ]
+					_ -> [] ) ++
+				( case map ((board!).(,castle_rank)) [1..5] of
+					[ Just (rookcol,Rook),Nothing,Nothing,Nothing,Just (kingcol,King) ] |
+						kingcol==colour_to_move && rookcol==colour_to_move &&
+						all (no_check position) (map (,castle_rank) [4..5]) &&
+						all (\ (Move f _ _ _) -> f /= (1,castle_rank) && f /= (5,castle_rank)) moves ->
+							[ Move (5,castle_rank) (3,castle_rank) Nothing Nothing ]
+					_ -> [] )
+			of
+			[] -> Left $ case no_check position (kings_coors position) of
+				True  -> Stalemate colour_to_move
+				False -> Checkmate colour_to_move
+			moves -> Right moves
 
 	where
 
-	kings_coors = head [ coors | (coors,Just (col,King)) <- assocs board, col==colour_to_move ]
-
-	king_no_check move = no_check (doMove position move) kings_coors
-
 	castle_rank = if colour_to_move==White then 1 else 8
 
-	no_check pos coors = all (\ (_,(_,(to,_))) -> coors /= to) $
-		move_targets (pos { positionColourToMove = nextColour colour_to_move })
+move_targets :: Position -> [(PieceType,(Coors,(Coors,Maybe Coors)))]
+move_targets position@(Position moves board colour_to_move) = [ (piecetype,(from,target)) |
+	(from,Just (colour,piecetype)) <- assocs board,
+	colour==colour_to_move,
+	target <- case (piecetype,from) of
+		(Pawn,(_,r)) ->
+			filter (isNothing.snd) (dir_targets from (pawn_dir,if r==pawn_initial_rank then 2 else 1)) ++
+			filter (isJust.snd) (concatMap (dir_targets from) [(pawn_dir+west,1),(pawn_dir+east,1)]) ++
+			[ (pawn_dir+eastwest,Just take) | r == 9 - pawn_initial_rank, eastwest <- [east,west],
+				Just take <- [ addrelcoors from eastwest ],
+				Just (col,Pawn) <- [ board!take ],
+				Just pawn_from <- [ addrelcoors from (pawn_dir*2+eastwest) ],
+				(Move last_from last_to _ _):_ <- [ reverse moves ], last_from==pawn_from, last_to==take,
+				col == nextColour colour_to_move ]
+		_ -> concatMap (dir_targets from) $ case piecetype of
+			Knight -> map (,1) [
+				north*2+east,north*2+west,east*2+north,east*2+south,
+				south*2+east,south*2+west,west*2+north,west*2+south ]
+			Bishop -> map (,7) diagonal
+			Rook   -> map (,7) straight
+			Queen  -> map (,7) (straight++diagonal)
+			King   -> map (,1) (straight++diagonal) ]
+	where
 
-	move_targets :: Position -> [(PieceType,(Coors,(Coors,Maybe Coors)))]
-	move_targets position@(Position moves board colour_to_move) = [ (piecetype,(from,target)) |
-		(from,Just (colour,piecetype)) <- assocs board,
-		colour==colour_to_move,
-		target <- case (piecetype,from) of
-			(Pawn,(_,r)) ->
-				filter (isNothing.snd) (dir_targets from (pawn_dir,if r==pawn_initial_rank then 2 else 1)) ++
-				filter (isJust.snd) (concatMap (dir_targets from) [(pawn_dir+west,1),(pawn_dir+east,1)]) ++
-				[ (pawn_dir+eastwest,Just take) | r == 9 - pawn_initial_rank, eastwest <- [east,west],
-					Just take <- [ addrelcoors from eastwest ],
-					Just (col,Pawn) <- [ board!take ],
-					Just pawn_from <- [ addrelcoors from (pawn_dir*2+eastwest) ],
-					(Move last_from last_to _ _):_ <- [ reverse moves ], last_from==pawn_from, last_to==take,
-					col == nextColour colour_to_move ]
-			_ -> concatMap (dir_targets from) $ case piecetype of
-				Knight -> map (,1) [
-					north*2+east,north*2+west,east*2+north,east*2+south,
-					south*2+east,south*2+west,west*2+north,west*2+south ]
-				Bishop -> map (,7) diagonal
-				Rook   -> map (,7) straight
-				Queen  -> map (,7) (straight++diagonal)
-				King   -> map (,1) (straight++diagonal) ]
-
-	(pawn_dir,pawn_initial_rank) = if colour_to_move==White then (north,2) else (south,7)
+	pawn_initial_rank = pawnInitialRank colour_to_move
+	pawn_dir          = pawnDir colour_to_move
 
 	dir_targets :: Coors -> (Coors,Int) -> [(Coors,Maybe Coors)]
 	dir_targets _ (_,0) = []
@@ -138,9 +145,6 @@ moveGenerator position@(Position moves board colour_to_move) = case sort $ map s
 		Just coors -> case board!coors of
 			Just (colour,_) -> if colour == nextColour colour_to_move then [(coors,Just coors)] else []
 			Nothing -> (coors,Nothing) : dir_targets coors (direction,i-1)
-
-	straight@[south,north,east,west] = [(0,-1),(0,1),(1,0),(-1,0)]
-	diagonal = [ north+east,north+west,south+east,south+west ]
 
 	addrelcoors (file,rank) (dx,dy) = case ( file + dx, rank + dy ) of
 		(x,y) | x `elem` [1..8] && y `elem` [1..8] -> Just (x,y)
@@ -166,7 +170,7 @@ evalPosition pos@Position{..} = case moveGenerator pos of
 			where
 			num_moves = fromIntegral (length (filter (==coors) $ map moveFrom moves))
 			pawn_targetrank = if colour==White then 8 else 1
-			proximity_to_centre = 5.0 - sqrt $ (abs (4.5 - fromIntegral r))^2 + (abs (4.5 - fromIntegral f))^2
+			proximity_to_centre = 5.0 - sqrt ( (abs (4.5 - fromIntegral r))^2 + (abs (4.5 - fromIntegral f))^2 )
 
 putStrConsoleLn s = do
 	putStrLn s
@@ -197,6 +201,48 @@ testPosition = Position [] (array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f
 	w = Just . (White,)
 	b = Just . (Black,)
 
+showFile f = take 1 $ drop f " abcdefgh"
+showCoors (f,r) = showFile f ++ show r 
+
+-- is the square coors not threatened by next player
+no_check pos coors = {-trace ("no_check " ++ show coors ++ " " ++ show nc)-} nc
+	where nc = all (\ (_,(_,(to,_))) -> coors /= to) $
+		move_targets (pos { positionColourToMove = nextColour (positionColourToMove pos) })
+
+-- the position of the king of the player to move in this position
+kings_coors Position{..} = head [ coors | (coors,Just (col,King)) <- assocs positionBoard, col==positionColourToMove ]
+
+-- would the king of the player to move in pos be in check after the move
+king_no_check pos move = no_check (doMove pos move) (kings_coors pos)
+
+showMove :: Position -> Move -> String
+showMove pos@Position{..} move@(Move from@(f0,r0) to mb_takes mb_promote) =
+	( case mb_takes of
+		Just takes | takes/=to || piecetype_at from == Pawn -> showFile f0
+		_ ->
+			piece_str (piecetype_at from) ++
+			head ([ if f==f0 then show r0 else showFile f0 |
+				Move from'@(f,r) to' _ _ <- moves, from' /= from, to==to',
+				piecetype_at from == piecetype_at from' ] ++ [""]) ) ++
+	(if isJust mb_takes then "x" else "") ++
+	showCoors to ++
+	(maybe "" piece_str mb_promote) ++
+	(if no_check pos' (kings_coors pos') then "" else (
+		if moveGenerator pos' == Left (Checkmate (nextColour positionColourToMove))
+			then "#" else "+"))
+	where
+	Right moves = moveGenerator pos
+	piecetype_at coors = snd $ fromJust (positionBoard!coors)
+	pos' = doMove pos move
+	piece_str piecetype = fromJust $ lookup piecetype [(Pawn,""),(Knight,"N"),(Bishop,"B"),(Rook,"R"),(Queen,"Q"),(King,"K")]
+
+showMoves :: Position -> [Move] -> IO ()
+showMoves pos moves = showline moves where
+	showline [] = return ()
+	showline ms = do
+		putStrConsoleLn $ concatMap (\ m -> printf "%-8s" (showMove pos m)) (take 10 ms)
+		showline (drop 10 ms)
+
 main = do
 --	writeFile "test.txt" ""
 	let Right moves = moveGenerator testPosition
@@ -217,11 +263,12 @@ step position (move:left_moves)= do
 			getLine
 			return ()
 		Right moves -> do
+			putStrConsoleLn "Possible moves:"
+			showMoves pos' moves
 			s <- getLine
 			case s of
 				""  -> step position left_moves
-				"m" -> do
-					step pos' moves
+				"m" -> step pos' moves
 				"b" -> return ()
 				"q" -> error $ "Quit."
 
