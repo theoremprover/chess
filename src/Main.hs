@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections,ScopedTypeVariables,RecordWildCards #-}
+{-# LANGUAGE TupleSections,ScopedTypeVariables,RecordWildCards,FlexibleContexts #-}
 
 module Main where
 
@@ -9,11 +9,14 @@ import Control.Monad
 import Text.Printf
 import Data.NumInstances
 import Data.Tuple
-import Debug.Trace
+import Control.Monad.State.Strict
+import Data.Char
 
 type File = Int
 type Rank = Int
 type Coors = (File,Rank)
+
+type Depth = Int
 
 data Colour = White | Black
 	deriving (Eq,Show,Enum,Ord)
@@ -74,7 +77,9 @@ diagonal = [ north+east,north+west,south+east,south+west ]
 pawnDir colour = if colour==White then north else south
 pawnInitialRank colour = if colour==White then 2 else 7
 
-moveGenerator :: Position -> Either MatchEnding [Move]
+type EndingOrMoves = Either MatchEnding [Move]
+
+moveGenerator :: Position -> EndingOrMoves
 moveGenerator position@(Position moves board colour_to_move) =
 	case sort $ map swap $ catMaybes $ elems board of
 		[ (King,_),(King,_) ] -> Left Remis
@@ -150,9 +155,10 @@ move_targets position@(Position moves board colour_to_move) = [ (piecetype,(from
 		(x,y) | x `elem` [1..8] && y `elem` [1..8] -> Just (x,y)
 		_ -> Nothing
 
-mAX_RATING = 1000000.0 :: Float
+type Rating = Float
+mAX_RATING = 1000000.0 :: Rating
 
-evalPosition :: Position -> Float
+evalPosition :: Position -> Rating
 evalPosition pos@Position{..} = case moveGenerator pos of
 	Left ending -> case ending of
 		Checkmate colour -> (if colour==White then negate else id) mAX_RATING
@@ -166,7 +172,7 @@ evalPosition pos@Position{..} = case moveGenerator pos of
 				Bishop -> 3.0 + 0.10*proximity_to_centre +                         0.02*num_moves
 				Rook   -> 5.0 +                                                    0.02*num_moves
 				Queen  -> 9.0 + 0.10*proximity_to_centre +                         0.01*num_moves
-				King   -> 10000.0 ) :: Float
+				King   -> 10000.0 ) :: Rating
 			where
 			num_moves = fromIntegral (length (filter (==coors) $ map moveFrom moves))
 			pawn_targetrank = if colour==White then 8 else 1
@@ -205,9 +211,8 @@ showFile f = take 1 $ drop f " abcdefgh"
 showCoors (f,r) = showFile f ++ show r 
 
 -- is the square coors not threatened by next player
-no_check pos coors = {-trace ("no_check " ++ show coors ++ " " ++ show nc)-} nc
-	where nc = all (\ (_,(_,(to,_))) -> coors /= to) $
-		move_targets (pos { positionColourToMove = nextColour (positionColourToMove pos) })
+no_check pos coors = all (\ (_,(_,(to,_))) -> coors /= to) $
+	move_targets (pos { positionColourToMove = nextColour (positionColourToMove pos) })
 
 -- the position of the king of the player to move in this position
 kings_coors Position{..} = head [ coors | (coors,Just (col,King)) <- assocs positionBoard, col==positionColourToMove ]
@@ -224,13 +229,13 @@ showMove pos@Position{..} move@(Move from@(f0,r0) to mb_takes mb_promote) =
 		(piece_from,_,_) -> ( case mb_takes of
 			Just takes | takes/=to || piece_from == Pawn -> showFile f0
 			_ ->
-				piece_str piece_from ++
+				pieceStr piece_from ++
 				head ([ if f==f0 then show r0 else showFile f0 |
 					Move from'@(f,r) to' _ _ <- moves, from' /= from, to==to',
 					piece_from == piecetype_at from' ] ++ [""]) ) ++
 			(if isJust mb_takes then "x" else "") ++
 			showCoors to ++
-			(maybe "" piece_str mb_promote) ++
+			(maybe "" pieceStr mb_promote) ++
 			(if no_check pos' (kings_coors pos') then "" else (
 				if moveGenerator pos' == Left (Checkmate (nextColour positionColourToMove))
 					then "#" else "+"))
@@ -238,7 +243,8 @@ showMove pos@Position{..} move@(Move from@(f0,r0) to mb_takes mb_promote) =
 	Right moves = moveGenerator pos
 	piecetype_at coors = snd $ fromJust (positionBoard!coors)
 	pos' = doMove pos move
-	piece_str piecetype = fromJust $ lookup piecetype [(Pawn,""),(Knight,"N"),(Bishop,"B"),(Rook,"R"),(Queen,"Q"),(King,"K")]
+
+pieceStr piecetype = fromJust $ lookup piecetype [(Pawn,""),(Knight,"N"),(Bishop,"B"),(Rook,"R"),(Queen,"Q"),(King,"K")]
 
 showMoves :: Position -> [Move] -> IO ()
 showMoves pos moves = showline moves where
@@ -249,32 +255,87 @@ showMoves pos moves = showline moves where
 
 main = do
 --	writeFile "test.txt" ""
-	let Right moves = moveGenerator testPosition
-	step testPosition moves
+	loop 2 testPosition
 
-step _ [] = return ()
-step position (move:left_moves)= do
-	putStrConsoleLn "=================================="
-	let pos' = doMove position move
-	putStrConsoleLn $ "After " ++ show (positionColourToMove position) ++ " move " ++ show move ++ ":"
-	showPos pos'
-	putStrConsoleLn $ printf "Rating = %+.2f" (evalPosition pos')
-	putStrLn $ "Now " ++ show (positionColourToMove pos')++ " to move"
-	case moveGenerator pos' of
+loop depth pos = do
+	putStrConsoleLn "\n==================================\n"
+	showPos pos
+	putStrConsoleLn $ printf "\nRating = %+.2f" (evalPosition pos)
+	putStrConsoleLn $ "Current search depth setting = " ++ show depth
+	putStrConsoleLn "\nPossible moves:"
+	case moveGenerator pos of
 		Left ending -> do
-			putStrConsoleLn $ show ending
-			putStrConsoleLn "Press ENTER to go back"
+			putStrConsoleLn $ "ENDING: " ++ show ending
+			putStrConsoleLn "ENTER to take back, if possible"
 			getLine
 			return ()
 		Right moves -> do
-			putStrConsoleLn "Possible moves:"
-			showMoves pos' moves
+			showMoves pos moves
+			putStrConsoleLn "\nEnter command:"
 			s <- getLine
 			case s of
-				""  -> step position left_moves
-				"m" -> step pos' moves
+				"s" -> do
+					case moves of
+						[] -> do
+							putStrConsoleLn $ "No moves possible in this position"
+							loop depth pos
+						_ -> do
+							putStrConsoleLn $ "Searching..."
+							(move,s) <- runStateT (search depth pos) initialSearchState
+							putStrConsoleLn $ "Found best move " ++ showMove pos move
+							do_move move
 				"b" -> return ()
 				"q" -> error $ "Quit."
+				depthstr | all isDigit depthstr -> do
+					let (depth',""):_ = (reads :: ReadS Int) depthstr
+					putStrConsoleLn $ "Setting depth = " ++ show depth'
+					loop depth' pos
+				movestr -> case filter ((==movestr).tostr) moves of
+					[move] -> do_move move
+					_ -> do
+						putStrConsoleLn $ "Wrong move: " ++ show movestr
+						loop depth pos
+					where
+					tostr Move{..} = showCoors moveFrom ++ showCoors moveTo ++ maybe "" pieceStr movePromote
+	where
 
---search depth position = do
-	
+	do_move	move = do
+		loop depth (doMove pos move)
+		loop depth pos
+
+data SearchState = SearchState {
+	nodesProcessed :: Int,
+	bestLine :: [(Move,Rating)] }
+	deriving (Show)
+initialSearchState = SearchState 0 []
+
+search :: (MonadState SearchState m) => Depth -> Position -> m Move
+search maxdepth position = do
+	val <- do_search maxdepth 0 position []
+	best_line <- gets bestLine
+	return $ last best_line
+
+type Line = [Move]
+
+do_search :: Depth -> Depth -> Position -> Line -> Rating
+do_search maxdepth depth position _ | depth >= maxdepth = evalPosition position
+do_search maxdepth depth position line = do
+	case moveGenerator position of
+		Left ending -> return $ evalPosition position
+		Right moves -> do
+			forM moves $ \ move -> do
+				modify' $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
+				do_search maxdepth (depth+1) (doMove position move)
+				
+
+
+			modify' $ \ s -> s { bestLine = (head moves,init_val) : bestLine s }
+			forM moves $ \ move -> do
+				(_,best_val):_ <- gets bestLine
+				when (comp_fun val best_val) $
+					modify' $ \ s -> s { bestLine = (move,val) : tail (bestLine s) }
+			gets (snd.head.bestLine)
+			where
+			(init_val,comp_fun) = case positionColourToMove position of
+				White -> (-mAX_RATING,(>))
+				Black -> ( mAX_RATING,(<))
