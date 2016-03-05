@@ -213,23 +213,27 @@ no_check pos coors = {-trace ("no_check " ++ show coors ++ " " ++ show nc)-} nc
 kings_coors Position{..} = head [ coors | (coors,Just (col,King)) <- assocs positionBoard, col==positionColourToMove ]
 
 -- would the king of the player to move in pos be in check after the move
-king_no_check pos move = no_check (doMove pos move) (kings_coors pos)
+king_no_check pos move = no_check pos' (kings_coors pos') where
+	pos' = (doMove pos move) { positionColourToMove = positionColourToMove pos }
 
 showMove :: Position -> Move -> String
 showMove pos@Position{..} move@(Move from@(f0,r0) to mb_takes mb_promote) =
-	( case mb_takes of
-		Just takes | takes/=to || piecetype_at from == Pawn -> showFile f0
-		_ ->
-			piece_str (piecetype_at from) ++
-			head ([ if f==f0 then show r0 else showFile f0 |
-				Move from'@(f,r) to' _ _ <- moves, from' /= from, to==to',
-				piecetype_at from == piecetype_at from' ] ++ [""]) ) ++
-	(if isJust mb_takes then "x" else "") ++
-	showCoors to ++
-	(maybe "" piece_str mb_promote) ++
-	(if no_check pos' (kings_coors pos') then "" else (
-		if moveGenerator pos' == Left (Checkmate (nextColour positionColourToMove))
-			then "#" else "+"))
+	case (piecetype_at from,from,to) of
+		(King,(5,_),(7,_)) -> "O-O"
+		(King,(5,_),(3,_)) -> "O-O-O"
+		(piece_from,_,_) -> ( case mb_takes of
+			Just takes | takes/=to || piece_from == Pawn -> showFile f0
+			_ ->
+				piece_str piece_from ++
+				head ([ if f==f0 then show r0 else showFile f0 |
+					Move from'@(f,r) to' _ _ <- moves, from' /= from, to==to',
+					piece_from == piecetype_at from' ] ++ [""]) ) ++
+			(if isJust mb_takes then "x" else "") ++
+			showCoors to ++
+			(maybe "" piece_str mb_promote) ++
+			(if no_check pos' (kings_coors pos') then "" else (
+				if moveGenerator pos' == Left (Checkmate (nextColour positionColourToMove))
+					then "#" else "+"))
 	where
 	Right moves = moveGenerator pos
 	piecetype_at coors = snd $ fromJust (positionBoard!coors)
