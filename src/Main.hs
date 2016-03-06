@@ -305,37 +305,49 @@ loop depth pos = do
 
 data SearchState = SearchState {
 	nodesProcessed :: Int,
-	bestLine :: [(Move,Rating)] }
+	leavesProcessed :: Int,
+	evaluationsDone :: Int,
+	bestLineUpdates :: Int,
+	bestLine :: (Rating,[Move]) }
 	deriving (Show)
-initialSearchState = SearchState 0 []
+initialSearchState = SearchState 0 0 0 0 (0,[])
 
 search :: (MonadState SearchState m) => Depth -> Position -> m Move
 search maxdepth position = do
-	val <- do_search maxdepth 0 position []
-	best_line <- gets bestLine
-	return $ last best_line
+	(val,line) <- do_search maxdepth 0 position
+	return $ head line
 
-type Line = [Move]
+do_search :: (MonadState SearchState m) => Depth -> Depth -> Position -> m (Rating,[Move])
+do_search maxdepth depth position = case depth >= maxdepth of
+	True -> do
+		modify' $ \ s -> s {
+			leavesProcessed = leavesProcessed s + 1,
+			nodesProcessed = nodesProcessed s + 1,
+			evaluationsDone = evaluationsDone s + 1 }
+		return $ (evalPosition position,[])
 
-do_search :: Depth -> Depth -> Position -> Line -> Rating
-do_search maxdepth depth position _ | depth >= maxdepth = evalPosition position
-do_search maxdepth depth position line = do
-	case moveGenerator position of
-		Left ending -> return $ evalPosition position
-		Right moves -> do
-			forM moves $ \ move -> do
-				modify' $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
-				do_search maxdepth (depth+1) (doMove position move)
-				
+	False -> case moveGenerator position of
+		Left _ -> do_search maxdepth maxdepth position
+		Right [] -> error "Move generator returned empty move list!"
+		Right moves -> find_best_line (worst_val,[]) moves
 
+		where
 
-			modify' $ \ s -> s { bestLine = (head moves,init_val) : bestLine s }
-			forM moves $ \ move -> do
-				(_,best_val):_ <- gets bestLine
-				when (comp_fun val best_val) $
-					modify' $ \ s -> s { bestLine = (move,val) : tail (bestLine s) }
-			gets (snd.head.bestLine)
-			where
-			(init_val,comp_fun) = case positionColourToMove position of
-				White -> (-mAX_RATING,(>))
-				Black -> ( mAX_RATING,(<))
+		(worst_val,minimax) = case positionColourToMove position of
+			White -> (-mAX_RATING,max)
+			Black -> ( mAX_RATING,min)
+
+		find_best_line :: (MonadState SearchState m) => (Rating,[Move]) -> [Move] -> m (Rating,[Move])
+		find_best_line best [] = return best
+		find_best_line best@(best_val,best_subline) (move:moves) = do
+			let pos' = doMove position move
+			modify' $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
+			this@(this_val,_) <- do_search maxdepth (depth+1) pos'
+			best' <- case minimax best_val this_val == this_val of
+				True -> do
+					modify' $ \ s -> s {
+						bestLine = (this_val,take depth (snd $ bestLine s) ++ best_subline),
+						bestLineUpdates = bestLineUpdates s + 1 }
+					return this
+				False -> return best
+			find_best_line best' moves
