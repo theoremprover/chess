@@ -345,6 +345,17 @@ search maxdepth position = do
 	(val,line) <- do_search maxdepth 0 position
 	return $ head line
 
+debug_here depth str = do
+	s <- get
+	liftIO $ do
+		putStrConsoleLn $ "\n========== " ++ str
+		putStrConsoleLn $ printf "Depth=%i, Best Rating=%+.2f" depth (bestVal s)
+		putStrConsoleLn $ "Best Line: " ++ showLine (bestLine s)
+		putStrConsoleLn $ "Computation Progress: " ++ show (computationProgress s)
+		putStrConsoleLn $ "============================"
+		putStrConsoleLn "Press Enter"
+		getLine
+
 do_search :: Depth -> Depth -> Position -> SearchMonad (Rating,[Move])
 do_search maxdepth depth position = case depth >= maxdepth of
 	True -> do
@@ -360,15 +371,18 @@ do_search maxdepth depth position = case depth >= maxdepth of
 				(100.0 * comp_progress [] (reverse $ computationProgress s)) (bestVal s) (showLine (bestLine s))
 			modify' $ \ s -> s { lastStateOutputTime = current_secs }
 --			liftIO $ putStrConsoleLn $ show (computationProgress s)
+		debug_here depth "LEAF"
 		return $ (evalPosition position,[])
 
 	False -> case moveGenerator position of
 		Left _ -> do_search maxdepth maxdepth position
 		Right [] -> error "The impossible happened: Move generator returned empty move list!"
 		Right moves -> do
+			debug_here depth "STEPPING DOWN"
 			modify' $ \ s -> s { computationProgress = (0,length moves) : computationProgress s }
 			res <- find_best_line (worst_val,[]) moves
 			modify' $ \ s -> s { computationProgress = tail (computationProgress s) }
+			debug_here depth "STEPPED UP"
 			return res
 
 		where
@@ -387,7 +401,9 @@ do_search maxdepth depth position = case depth >= maxdepth of
 				bestLine = case length (bestLine s) >= depth + 1 of
 					True  -> bestLine s
 					False -> (bestLine s ++ [move]) }
+			debug_here depth "MOVED"
 			this@(this_val,_) <- do_search maxdepth (depth+1) pos'
+			debug_here depth "AFTER DO_SEARCH"
 			best' <- case minimax best_val this_val == this_val of
 				True -> do
 					modify' $ \ s -> s {
@@ -396,4 +412,5 @@ do_search maxdepth depth position = case depth >= maxdepth of
 						bestLineUpdates = bestLineUpdates s + 1 }
 					return this
 				False -> return best
+			debug_here depth "AFTER BEST'"
 			find_best_line best' moves
