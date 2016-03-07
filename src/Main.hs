@@ -303,7 +303,7 @@ loop depth pos = do
 							do_move move
 				"b" -> return ()
 				"q" -> error $ "Quit."
-				depthstr | all isDigit depthstr -> do
+				depthstr | length depthstr > 0 && all isDigit depthstr -> do
 					let (depth',""):_ = (reads :: ReadS Int) depthstr
 					putStrConsoleLn $ "Setting depth = " ++ show depth'
 					loop depth' pos
@@ -324,6 +324,7 @@ showLine :: [Move] -> String
 showLine moves = intercalate ", " (map showMove_FromTo moves)
 
 data SearchState = SearchState {
+	debugMode       :: Bool,
 	nodesProcessed  :: Int,
 	leavesProcessed :: Int,
 	evaluationsDone :: Int,
@@ -331,9 +332,9 @@ data SearchState = SearchState {
 	lastStateOutputTime :: Integer,
 	bestLine            :: [Move],
 	bestVal             :: Rating,
-	computationProgress  :: [(Int,Int)] }
+	computationProgress :: [(Int,Int)] }
 	deriving (Show)
-initialSearchState = SearchState 0 0 0 0 0 [] 0.0 []
+initialSearchState = SearchState True 0 0 0 0 0 [] 0.0 []
 
 comp_progress _ [] = 0.0 :: Float
 comp_progress ts ((i,n):ins) = product ts * fromIntegral (i-1) / fromIntegral n + comp_progress ((1 / fromIntegral n):ts) ins
@@ -342,47 +343,36 @@ type SearchMonad a = StateT SearchState IO a
 
 search :: Depth -> Position -> SearchMonad Move
 search maxdepth position = do
-	(val,line) <- do_search maxdepth 0 position
+	(val,line) <- do_search maxdepth 0 position []
 	return $ head line
 
-debug_here depth str = do
+debug_here depth str current_line = do
 	s <- get
-	liftIO $ do
-		putStrConsoleLn $ "\n========== " ++ str
-		putStrConsoleLn $ printf "Depth=%i, Best Rating=%+.2f" depth (bestVal s)
-		putStrConsoleLn $ "Best Line: " ++ showLine (bestLine s)
-		putStrConsoleLn $ "Computation Progress: " ++ show (computationProgress s)
-		putStrConsoleLn $ "============================"
-		putStrConsoleLn "Press Enter"
-		getLine
+	when (debugMode s) $ do
+		input <- liftIO $ do
+			putStrConsoleLn $ "\n========== " ++ str
+			putStrConsoleLn $ printf "Depth=%i, Best Rating=%+.2f" depth (bestVal s)
+			putStrConsoleLn $ "Best Line: " ++ showLine (bestLine s)
+			putStrConsoleLn $ "Computation Progress: " ++ show (computationProgress s)
+			putStrConsoleLn $ "Current Line: " ++ showLine current_line
+			putStrConsoleLn $ "============================"
+			putStrConsoleLn "Press Enter or 'd0'"
+			getLine
+		case input of
+			"d0" -> modify' $ \ s -> s { debugMode = False }
+			_ -> return ()
 
-do_search :: Depth -> Depth -> Position -> SearchMonad (Rating,[Move])
-do_search maxdepth depth position = case depth >= maxdepth of
-	True -> do
-		modify' $ \ s -> s {
-			leavesProcessed = leavesProcessed s + 1,
-			nodesProcessed  = nodesProcessed  s + 1,
-			evaluationsDone = evaluationsDone s + 1 }
-		last_output_secs <- gets lastStateOutputTime
-		TOD current_secs _ <- liftIO $ getClockTime
-		when (current_secs - last_output_secs >=1) $ do
-			s <- get
-			liftIO $ putStrConsoleLn $ printf "[%3.0f%%] Best line: %+.2f  <-  %s"
-				(100.0 * comp_progress [] (reverse $ computationProgress s)) (bestVal s) (showLine (bestLine s))
-			modify' $ \ s -> s { lastStateOutputTime = current_secs }
---			liftIO $ putStrConsoleLn $ show (computationProgress s)
-		debug_here depth "LEAF"
-		return $ (evalPosition position,[])
-
-	False -> case moveGenerator position of
-		Left _ -> do_search maxdepth maxdepth position
+do_search :: Depth -> Depth -> Position -> [Move] -> SearchMonad (Rating,[Move])
+do_search maxdepth depth position current_line = 
+	case moveGenerator position of
+		Left _ -> do_search maxdepth maxdepth position current_line
 		Right [] -> error "The impossible happened: Move generator returned empty move list!"
 		Right moves -> do
-			debug_here depth "STEPPING DOWN"
 			modify' $ \ s -> s { computationProgress = (0,length moves) : computationProgress s }
+			debug_here depth "AFTER MOVEGEN" current_line
 			res <- find_best_line (worst_val,[]) moves
 			modify' $ \ s -> s { computationProgress = tail (computationProgress s) }
-			debug_here depth "STEPPED UP"
+			debug_here depth "AFTER FIND_BEST_LINE" current_line
 			return res
 
 		where
@@ -393,24 +383,34 @@ do_search maxdepth depth position = case depth >= maxdepth of
 
 		find_best_line :: (Rating,[Move]) -> [Move] -> SearchMonad (Rating,[Move])
 		find_best_line best [] = return best
-		find_best_line best@(best_val,best_subline) (move:moves) = do
-			let pos' = doMove position move
-			modify' $ \ s -> s {
-				nodesProcessed = nodesProcessed s + 1,
-				computationProgress = let ((i,n):ps) = computationProgress s in (i+1,n):ps,
-				bestLine = case length (bestLine s) >= depth + 1 of
-					True  -> bestLine s
-					False -> (bestLine s ++ [move]) }
-			debug_here depth "MOVED"
-			this@(this_val,_) <- do_search maxdepth (depth+1) pos'
-			debug_here depth "AFTER DO_SEARCH"
+		find_best_line best@(best_val,_) (move:moves) = do
+			modify' $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
+			let current_line' = current_line ++ [move]
+			debug_here depth "NEXT_LINE..." current_line
+			this@(this_val,this_subline) <- case depth+1 < maxdepth of
+				True -> do_search maxdepth (depth+1) (doMove position move) current_line'
+				False -> do
+					modify' $ \ s -> s {
+						leavesProcessed = leavesProcessed s + 1,
+						nodesProcessed  = nodesProcessed  s + 1,
+						evaluationsDone = evaluationsDone s + 1 }
+					last_output_secs <- gets lastStateOutputTime
+					TOD current_secs _ <- liftIO $ getClockTime
+					when (current_secs - last_output_secs >=1) $ do
+						s <- get
+						liftIO $ putStrConsoleLn $ printf "[%3.0f%%] Best line: %+.2f  <-  %s"
+							(100.0 * comp_progress [] (reverse $ computationProgress s)) (bestVal s) (showLine (bestLine s))
+						modify' $ \ s -> s { lastStateOutputTime = current_secs }
+					return $ (evalPosition position,[])			
+			debug_here depth "AFTER DO_SEARCH/LEAF" current_line'
 			best' <- case minimax best_val this_val == this_val of
 				True -> do
 					modify' $ \ s -> s {
-						bestLine = take depth (bestLine s) ++ best_subline,
+						bestLine = current_line' ++ this_subline,
 						bestVal = this_val,
 						bestLineUpdates = bestLineUpdates s + 1 }
 					return this
 				False -> return best
-			debug_here depth "AFTER BEST'"
+			debug_here depth "AFTER BEST'" current_line'
+			modify' $ \ s -> s { computationProgress = let ((i,n):ps) = computationProgress s in (i+1,n):ps }
 			find_best_line best' moves
