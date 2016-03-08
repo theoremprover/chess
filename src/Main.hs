@@ -276,9 +276,8 @@ main = do
 loop depth pos = do
 	putStrConsoleLn "\n==================================\n"
 	showPos pos
-	putStrConsoleLn $ printf "\nRating = %+.2f" (evalPosition pos)
+	putStrConsoleLn $ printf "\nRating = %+2.2f" (evalPosition pos)
 	putStrConsoleLn $ "Current search depth setting = " ++ show depth
-	putStrConsoleLn "\nPossible moves:"
 	case moveGenerator pos of
 		Left ending -> do
 			putStrConsoleLn $ "ENDING: " ++ show ending
@@ -286,21 +285,22 @@ loop depth pos = do
 			getLine
 			return ()
 		Right moves -> do
+			putStrConsoleLn "\nPossible moves:"
 			showMoves pos moves
+			putStrConsoleLn $ intercalate "  " (map showMove_FromTo moves)
 			putStrConsoleLn "\nEnter command:\n> "
 			s <- getLine
 			case s of
 				"s" -> do
-					case moves of
-						[] -> do
-							putStrConsoleLn $ "No moves possible in this position"
-							loop depth pos
-						_ -> do
-							putStrConsoleLn $ "Searching..."
-							(move,s) <- runStateT (search depth pos) initialSearchState
-							putStrConsoleLn $ show s
-							putStrConsoleLn $ "Found best move " ++ showMove pos move
-							do_move move
+					putStrConsoleLn "Searching..."
+					((val,line),s) <- runStateT (search depth pos) initialSearchState
+					case line of
+						[] -> putStrConsoleLn $ printf "Value = %+2.2f, no move possible." val
+						best_move:_ -> do
+							putStrConsoleLn $ showSearchState s
+							putStrConsoleLn $ "Found best move " ++ showMove pos best_move
+							putStrConsoleLn $ "Best line: " ++ showLine line
+							do_move best_move
 				"b" -> return ()
 				"q" -> error $ "Quit."
 				depthstr | length depthstr > 0 && all isDigit depthstr -> do
@@ -318,7 +318,7 @@ loop depth pos = do
 		loop depth (doMove pos move)
 		loop depth pos
 
-showMove_FromTo Move{..} = showCoors moveFrom ++ showCoors moveTo ++ maybe " " pieceStr movePromote
+showMove_FromTo Move{..} = showCoors moveFrom ++ showCoors moveTo ++ maybe "" pieceStr movePromote
 
 showLine :: [Move] -> String
 showLine moves = intercalate ", " (map showMove_FromTo moves)
@@ -334,17 +334,18 @@ data SearchState = SearchState {
 	bestVal             :: Rating,
 	computationProgress :: [(Int,Int)] }
 	deriving (Show)
-initialSearchState = SearchState True 0 0 0 0 0 [] 0.0 []
+initialSearchState = SearchState False 0 0 0 0 0 [] 0.0 []
+
+showSearchState s = printf "Tot. %i Nodes, %i Leaves, %i Evals, bestLineUpdates=%i"
+	(nodesProcessed s) (leavesProcessed s) (evaluationsDone s) (bestLineUpdates s)
 
 comp_progress _ [] = 0.0 :: Float
 comp_progress ts ((i,n):ins) = product ts * fromIntegral i / fromIntegral n + comp_progress ((1 / fromIntegral n):ts) ins
 
 type SearchMonad a = StateT SearchState IO a
 
-search :: Depth -> Position -> SearchMonad Move
-search maxdepth position = do
-	(val,line) <- do_search maxdepth 0 position []
-	return $ head line
+search :: Depth -> Position -> SearchMonad (Rating,[Move])
+search maxdepth position = do_search maxdepth 0 position []
 
 debug_here depth str current_line = do
 	s <- get
@@ -369,28 +370,30 @@ do_search maxdepth depth position current_line =
 		Right [] -> error "The impossible happened: Move generator returned empty move list!"
 		Right moves -> do
 			modify' $ \ s -> s { computationProgress = (0,length moves) : computationProgress s }
---			debug_here depth "AFTER MOVEGEN" current_line
 			res <- find_best_line (worst_val,[]) moves
+			debug_here depth ("find_best_line returned " ++ show res) current_line
 			modify' $ \ s -> s { computationProgress = tail (computationProgress s) }
 			debug_here depth "AFTER FIND_BEST_LINE" current_line
 			return res
 
 		where
 
-		(worst_val,minimax) = case positionColourToMove position of
-			White -> (-mAX_RATING,max)
-			Black -> ( mAX_RATING,min)
+		(worst_val,isBetterThan) = case positionColourToMove position of
+			White -> (-mAX_RATING,(>))
+			Black -> ( mAX_RATING,(<))
 
 		find_best_line :: (Rating,[Move]) -> [Move] -> SearchMonad (Rating,[Move])
-		find_best_line best [] = return best
-		find_best_line best@(best_val,_) (move:moves) = do
+		find_best_line best [] = do
+			debug_here depth ("find_best_line [] returned " ++ show best) current_line
+			return best
+		find_best_line best@(best_val,best_line) (move:moves) = do
 			let
 				current_line' = current_line ++ [move]
 				depth' = depth + 1
 				position' = doMove position move
 			debug_here depth' ("CURRENT MOVE: " ++ showMove_FromTo move) current_line'
 			modify' $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
-			this@(this_val,this_subline) <- case depth' < maxdepth of
+			(this_val,this_subline) <- case depth' < maxdepth of
 				True -> do_search maxdepth depth' position' current_line'
 				False -> do
 					modify' $ \ s -> s {
@@ -405,14 +408,14 @@ do_search maxdepth depth position current_line =
 							(100.0 * comp_progress [] (reverse $ computationProgress s)) (bestVal s) (showLine (bestLine s))
 						modify' $ \ s -> s { lastStateOutputTime = current_secs }
 					return $ (evalPosition position',[])			
-			best' <- case minimax best_val this_val == this_val of
+			best' <- case this_val `isBetterThan` best_val of
 				True -> do
 					modify' $ \ s -> s {
 						bestLine = current_line' ++ this_subline,
 						bestVal = this_val,
 						bestLineUpdates = bestLineUpdates s + 1 }
-					return this
+					return (this_val,move:this_subline)
 				False -> return best
-			debug_here depth' (printf "AFTER COMPARISON: BEST was %+.2f, THIS is %+.2f" best_val this_val) current_line'
 			modify' $ \ s -> s { computationProgress = let ((i,n):ps) = computationProgress s in (i+1,n):ps }
+			debug_here depth' (printf "AFTER COMPARISON: BEST was %+.2f, THIS is %+.2f" best_val this_val) current_line'
 			find_best_line best' moves
