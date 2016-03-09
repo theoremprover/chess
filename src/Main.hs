@@ -345,9 +345,9 @@ comp_progress ts ((i,n):ins) = product ts * fromIntegral i / fromIntegral n + co
 type SearchMonad a = StateT SearchState IO a
 
 search :: Depth -> Position -> SearchMonad (Rating,[Move])
-search maxdepth position = do_search maxdepth 0 position []
+search maxdepth position = do_search maxdepth 0 position [] (-mAX_RATING,mAX_RATING)
 
-debug_here depth str current_line = do
+debug_here depth str current_line alphabeta = do
 	s <- get
 	when (debugMode s) $ do
 		input <- liftIO $ do
@@ -356,6 +356,7 @@ debug_here depth str current_line = do
 			putStrConsoleLn $ "Best Line: " ++ showLine (bestLine s)
 			putStrConsoleLn $ "Computation Progress: " ++ show (computationProgress s)
 			putStrConsoleLn $ "Current Line: " ++ showLine current_line
+			putStrConsoleLn $ "(alpha,beta) = " ++ show alphabeta
 			putStrConsoleLn $ "============================"
 			putStrConsoleLn "Press Enter or 'd0'"
 			getLine
@@ -363,8 +364,8 @@ debug_here depth str current_line = do
 			"d0" -> modify' $ \ s -> s { debugMode = False }
 			_ -> return ()
 
-do_search :: Depth -> Depth -> Position -> [Move] -> SearchMonad (Rating,[Move])
-do_search maxdepth depth position current_line = 
+do_search :: Depth -> Depth -> Position -> [Move] -> (Rating,Rating) -> SearchMonad (Rating,[Move])
+do_search maxdepth depth position current_line alphabeta = 
 	case moveGenerator position of
 		Left _ -> return (evalPosition position,[])
 		Right [] -> error "The impossible happened: Move generator returned empty move list!"
@@ -394,7 +395,7 @@ do_search maxdepth depth position current_line =
 			debug_here depth' ("CURRENT MOVE: " ++ showMove_FromTo move) current_line'
 			modify' $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
 			(this_val,this_subline) <- case depth' < maxdepth of
-				True -> do_search maxdepth depth' position' current_line'
+				True -> do_search maxdepth depth' position' current_line' alphabeta
 				False -> do
 					modify' $ \ s -> s {
 						leavesProcessed = leavesProcessed s + 1,
@@ -418,4 +419,4 @@ do_search maxdepth depth position current_line =
 				False -> return best
 			modify' $ \ s -> s { computationProgress = let ((i,n):ps) = computationProgress s in (i+1,n):ps }
 			debug_here depth' (printf "AFTER COMPARISON: BEST was %+.2f, THIS is %+.2f" best_val this_val) current_line'
-			find_best_line best' moves
+			find_best_line best' moves alphabeta'
