@@ -12,6 +12,7 @@ import Data.Tuple
 import Control.Monad.State.Strict
 import Data.Char
 import System.Time
+import Debug.Trace
 
 type File = Int
 type Rank = Int
@@ -126,11 +127,14 @@ move_targets position@(Position moves board colour_to_move) = [ (piecetype,(from
 		(Pawn,(_,r)) ->
 			filter (isNothing.snd) (dir_targets from (pawn_dir,if r==pawn_initial_rank then 2 else 1)) ++
 			filter (isJust.snd) (concatMap (dir_targets from) [(pawn_dir+west,1),(pawn_dir+east,1)]) ++
-			[ (pawn_dir+eastwest,Just take) | r == pawnEnPassantRank colour_to_move, eastwest <- [east,west],
+			[ (abs_to,Just take) | r == pawnEnPassantRank colour_to_move, eastwest <- [east,west],
+				Just abs_to <- [ addrelcoors from (pawn_dir+eastwest) ],
+				Nothing <- [ board!abs_to ],
 				Just take <- [ addrelcoors from eastwest ],
 				Just (col,Pawn) <- [ board!take ],
 				Just pawn_from <- [ addrelcoors from (pawn_dir*2+eastwest) ],
-				(Move last_from last_to _ _):_ <- [ reverse moves ], last_from==pawn_from, last_to==take,
+				(Move last_from last_to Nothing Nothing):_ <- [ reverse moves ],
+				last_from==pawn_from, last_to==take,
 				col == nextColour colour_to_move ]
 		_ -> concatMap (dir_targets from) $ case piecetype of
 			Knight -> map (,1) [
@@ -373,9 +377,9 @@ do_search maxdepth depth position current_line alphabeta =
 		Right moves -> do
 			modify' $ \ s -> s { computationProgress = (0,length moves) : computationProgress s }
 			res <- find_best_line (worst_val,[]) moves
-			debug_here depth ("find_best_line returned " ++ show res) current_line
+			debug_here depth ("find_best_line returned " ++ show res) current_line alphabeta
 			modify' $ \ s -> s { computationProgress = tail (computationProgress s) }
-			debug_here depth "AFTER FIND_BEST_LINE" current_line
+			debug_here depth "AFTER FIND_BEST_LINE" current_line alphabeta
 			return res
 
 		where
@@ -386,14 +390,14 @@ do_search maxdepth depth position current_line alphabeta =
 
 		find_best_line :: (Rating,[Move]) -> [Move] -> SearchMonad (Rating,[Move])
 		find_best_line best [] = do
-			debug_here depth ("find_best_line [] returned " ++ show best) current_line
+			debug_here depth ("find_best_line [] returned " ++ show best) current_line alphabeta
 			return best
 		find_best_line best@(best_val,best_line) (move:moves) = do
 			let
 				current_line' = current_line ++ [move]
 				depth' = depth + 1
 				position' = doMove position move
-			debug_here depth' ("CURRENT MOVE: " ++ showMove_FromTo move) current_line'
+			debug_here depth' ("CURRENT MOVE: " ++ showMove_FromTo move) current_line' alphabeta
 			modify' $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
 			(this_val,this_subline) <- case depth' < maxdepth of
 				True -> do_search maxdepth depth' position' current_line' alphabeta
@@ -419,5 +423,5 @@ do_search maxdepth depth position current_line alphabeta =
 					return (this_val,move:this_subline)
 				False -> return best
 			modify' $ \ s -> s { computationProgress = let ((i,n):ps) = computationProgress s in (i+1,n):ps }
-			debug_here depth' (printf "AFTER COMPARISON: BEST was %+.2f, THIS is %+.2f" best_val this_val) current_line'
-			find_best_line best' moves alphabeta'
+			debug_here depth' (printf "AFTER COMPARISON: BEST was %+.2f, THIS is %+.2f" best_val this_val) current_line' alphabeta
+			find_best_line best' moves
