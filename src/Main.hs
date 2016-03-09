@@ -77,6 +77,7 @@ diagonal = [ north+east,north+west,south+east,south+west ]
 
 pawnDir colour = if colour==White then north else south
 pawnInitialRank colour = if colour==White then 2 else 7
+pawnEnPassantRank colour = if colour==White then 5 else 4
 
 type EndingOrMoves = Either MatchEnding [Move]
 
@@ -125,7 +126,7 @@ move_targets position@(Position moves board colour_to_move) = [ (piecetype,(from
 		(Pawn,(_,r)) ->
 			filter (isNothing.snd) (dir_targets from (pawn_dir,if r==pawn_initial_rank then 2 else 1)) ++
 			filter (isJust.snd) (concatMap (dir_targets from) [(pawn_dir+west,1),(pawn_dir+east,1)]) ++
-			[ (pawn_dir+eastwest,Just take) | r == 9 - pawn_initial_rank, eastwest <- [east,west],
+			[ (pawn_dir+eastwest,Just take) | r == pawnEnPassantRank colour_to_move, eastwest <- [east,west],
 				Just take <- [ addrelcoors from eastwest ],
 				Just (col,Pawn) <- [ board!take ],
 				Just pawn_from <- [ addrelcoors from (pawn_dir*2+eastwest) ],
