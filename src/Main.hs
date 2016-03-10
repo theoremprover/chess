@@ -337,9 +337,11 @@ data SearchState = SearchState {
 	lastStateOutputTime :: Integer,
 	bestLine            :: [Move],
 	bestVal             :: Rating,
+	alphaUpdates        :: Int,
+	betaUpdates         :: Int,
 	computationProgress :: [(Int,Int)] }
 	deriving (Show)
-initialSearchState = SearchState False 0 0 0 0 0 [] 0.0 []
+initialSearchState = SearchState False 0 0 0 0 0 [] 0.0 0 0 []
 
 showSearchState s = printf "Tot. %i Nodes, %i Leaves, %i Evals, bestLineUpdates=%i"
 	(nodesProcessed s) (leavesProcessed s) (evaluationsDone s) (bestLineUpdates s)
@@ -370,7 +372,7 @@ debug_here depth str current_line alphabeta = do
 			_ -> return ()
 
 do_search :: Depth -> Depth -> Position -> [Move] -> (Rating,Rating) -> SearchMonad (Rating,[Move])
-do_search maxdepth depth position current_line alphabeta = 
+do_search maxdepth depth position current_line (alpha,beta) = 
 	case moveGenerator position of
 		Left _ -> return (evalPosition position,[])
 		Right [] -> error "The impossible happened: Move generator returned empty move list!"
@@ -392,13 +394,14 @@ do_search maxdepth depth position current_line alphabeta =
 		find_best_line best [] = do
 			debug_here depth ("find_best_line [] returned " ++ show best) current_line alphabeta
 			return best
-		find_best_line best@(best_val,best_line) (move:moves) = do
+		find_best_line best@(best_val,best_line) (move:moves) alphabeta = do
 			let
 				current_line' = current_line ++ [move]
 				depth' = depth + 1
 				position' = doMove position move
 			debug_here depth' ("CURRENT MOVE: " ++ showMove_FromTo move) current_line' alphabeta
 			modify' $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
+
 			(this_val,this_subline) <- case depth' < maxdepth of
 				True -> do_search maxdepth depth' position' current_line' alphabeta
 				False -> do
@@ -414,7 +417,8 @@ do_search maxdepth depth position current_line alphabeta =
 							(100.0 * comp_progress [] (reverse $ computationProgress s)) (bestVal s) (showLine (bestLine s))
 						modify' $ \ s -> s { lastStateOutputTime = current_secs }
 					return $ (evalPosition position',[])			
-			best' <- case this_val `isBetterThan` best_val of
+
+			best'@(best_val',_) <- case this_val `isBetterThan` best_val of
 				True -> do
 					modify' $ \ s -> s {
 						bestLine = current_line' ++ this_subline,
@@ -422,6 +426,21 @@ do_search maxdepth depth position current_line alphabeta =
 						bestLineUpdates = bestLineUpdates s + 1 }
 					return (this_val,move:this_subline)
 				False -> return best
+
+			alphabeta'@(alpha',beta') <- case colour_to_move of
+				White -> case best_val' `isBetterThan` beta of
+					True -> do
+						modify' $ \ s -> s { betaUpdates = betaUpdates + 1 }
+						return (alpha,best_val')
+					False -> return (alpha,beta)
+				Black -> case best_val' `isBetterThan` alpha of
+					True -> do
+						modify' $ \ s -> s { alphaUpdates = alphaUpdates + 1 }
+						return (best_val',beta)
+					False -> return (alpha,beta)
+
+			debug_here depth' (printf "AFTER COMPARISON: BEST was %+.2f, THIS is %+.2f" best_val this_val) current_line' alphabeta'
+
 			modify' $ \ s -> s { computationProgress = let ((i,n):ps) = computationProgress s in (i+1,n):ps }
-			debug_here depth' (printf "AFTER COMPARISON: BEST was %+.2f, THIS is %+.2f" best_val this_val) current_line' alphabeta
-			find_best_line best' moves
+
+			find_best_line best' moves alphabeta'
