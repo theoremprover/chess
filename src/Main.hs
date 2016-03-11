@@ -337,14 +337,14 @@ data SearchState = SearchState {
 	lastStateOutputTime :: Integer,
 	bestLine            :: [Move],
 	bestVal             :: Rating,
-	alphaUpdates        :: Int,
-	betaUpdates         :: Int,
+	alphaCutoffs        :: Int,
+	betaCutoffs         :: Int,
 	computationProgress :: [(Int,Int)] }
 	deriving (Show)
 initialSearchState = SearchState False 0 0 0 0 0 [] 0.0 0 0 []
 
-showSearchState s = printf "Tot. %i Nodes, %i Leaves, %i Evals, bestLineUpdates=%i"
-	(nodesProcessed s) (leavesProcessed s) (evaluationsDone s) (bestLineUpdates s)
+showSearchState s = printf "Tot. %i Nodes, %i Leaves, %i Evals, bestLineUpdates=%i, alpha/betaCutoffs=%i/%i"
+	(nodesProcessed s) (leavesProcessed s) (evaluationsDone s) (bestLineUpdates s) (alphaCutoffs s) (betaCutoffs s)
 
 comp_progress _ [] = 0.0 :: Float
 comp_progress ts ((i,n):ins) = product ts * fromIntegral i / fromIntegral n + comp_progress ((1 / fromIntegral n):ts) ins
@@ -364,6 +364,7 @@ debug_here depth str current_line alphabeta = do
 			putStrConsoleLn $ "Computation Progress: " ++ show (computationProgress s)
 			putStrConsoleLn $ "Current Line: " ++ showLine current_line
 			putStrConsoleLn $ "(alpha,beta) = " ++ show alphabeta
+			putStrConsoleLn $ printf "alphacutoffs = %i, betacutoffs = %i" (alphaCutoffs s) (betaCutoffs s)
 			putStrConsoleLn $ "============================"
 			putStrConsoleLn "Press Enter or 'd0'"
 			getLine
@@ -378,20 +379,20 @@ do_search maxdepth depth position current_line (alpha,beta) =
 		Right [] -> error "The impossible happened: Move generator returned empty move list!"
 		Right moves -> do
 			modify' $ \ s -> s { computationProgress = (0,length moves) : computationProgress s }
-			res <- find_best_line (worst_val,[]) moves
-			debug_here depth ("find_best_line returned " ++ show res) current_line alphabeta
+			res <- find_best_line (worst_val,[]) moves (alpha,beta)
+			debug_here depth ("find_best_line returned " ++ show res) current_line (alpha,beta)
 			modify' $ \ s -> s { computationProgress = tail (computationProgress s) }
-			debug_here depth "AFTER FIND_BEST_LINE" current_line alphabeta
+			debug_here depth "AFTER FIND_BEST_LINE" current_line (alpha,beta)
 			return res
 
 		where
 
 		(worst_val,isBetterThan) = case positionColourToMove position of
-			White -> (-mAX_RATING,(>))
-			Black -> ( mAX_RATING,(<))
+			White -> (alpha,(>))
+			Black -> (beta,(<))
 
-		find_best_line :: (Rating,[Move]) -> [Move] -> SearchMonad (Rating,[Move])
-		find_best_line best [] = do
+		find_best_line :: (Rating,[Move]) -> [Move] -> (Rating,Rating) -> SearchMonad (Rating,[Move])
+		find_best_line best [] alphabeta = do
 			debug_here depth ("find_best_line [] returned " ++ show best) current_line alphabeta
 			return best
 		find_best_line best@(best_val,best_line) (move:moves) alphabeta = do
@@ -427,20 +428,20 @@ do_search maxdepth depth position current_line (alpha,beta) =
 					return (this_val,move:this_subline)
 				False -> return best
 
-			alphabeta'@(alpha',beta') <- case colour_to_move of
-				White -> case best_val' `isBetterThan` beta of
+			cutoff <- case positionColourToMove position of
+				White -> case best_val' `isBetterThan` beta || best_val'==beta of
 					True -> do
-						modify' $ \ s -> s { betaUpdates = betaUpdates + 1 }
-						return (alpha,best_val')
-					False -> return (alpha,beta)
-				Black -> case best_val' `isBetterThan` alpha of
+						modify' $ \ s -> s { betaCutoffs = betaCutoffs s + 1 }
+						return True
+					False -> return False
+				Black -> case alpha `isBetterThan` best_val' || best_val'==alpha of
 					True -> do
-						modify' $ \ s -> s { alphaUpdates = alphaUpdates + 1 }
-						return (best_val',beta)
-					False -> return (alpha,beta)
+						modify' $ \ s -> s { alphaCutoffs = alphaCutoffs s + 1 }
+						return True
+					False -> return False
 
-			debug_here depth' (printf "AFTER COMPARISON: BEST was %+.2f, THIS is %+.2f" best_val this_val) current_line' alphabeta'
+			debug_here depth' (printf "AFTER COMPARISON: BEST was %+.2f, THIS is %+.2f" best_val this_val) current_line' alphabeta
 
 			modify' $ \ s -> s { computationProgress = let ((i,n):ps) = computationProgress s in (i+1,n):ps }
 
-			find_best_line best' moves alphabeta'
+			find_best_line best' (if cutoff then [] else moves) alphabeta
