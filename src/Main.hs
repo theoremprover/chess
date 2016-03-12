@@ -341,7 +341,7 @@ data SearchState = SearchState {
 	betaCutoffs         :: Int,
 	computationProgress :: [(Int,Int)] }
 	deriving (Show)
-initialSearchState = SearchState False 0 0 0 0 0 [] 0.0 0 0 []
+initialSearchState = SearchState True 0 0 0 0 0 [] 0.0 0 0 []
 
 showSearchState s = printf "Tot. %i Nodes, %i Leaves, %i Evals, bestLineUpdates=%i, alpha/betaCutoffs=%i/%i"
 	(nodesProcessed s) (leavesProcessed s) (evaluationsDone s) (bestLineUpdates s) (alphaCutoffs s) (betaCutoffs s)
@@ -395,7 +395,7 @@ do_search maxdepth depth position current_line (alpha,beta) =
 		find_best_line best [] alphabeta = do
 			debug_here depth ("find_best_line [] returned " ++ show best) current_line alphabeta
 			return best
-		find_best_line best@(best_val,best_line) (move:moves) alphabeta = do
+		find_best_line best@(best_val,best_line) (move:moves) alphabeta@(alpha,beta) = do
 			let
 				current_line' = current_line ++ [move]
 				depth' = depth + 1
@@ -403,8 +403,11 @@ do_search maxdepth depth position current_line (alpha,beta) =
 			debug_here depth' ("CURRENT MOVE: " ++ showMove_FromTo move) current_line' alphabeta
 			modify' $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
 
+			let alphabeta' = case positionColourToMove position of
+				White -> (best_val,beta)
+				Black -> (alpha,best_val)
 			(this_val,this_subline) <- case depth' < maxdepth of
-				True -> do_search maxdepth depth' position' current_line' alphabeta
+				True -> do_search maxdepth depth' position' current_line' alphabeta'
 				False -> do
 					modify' $ \ s -> s {
 						leavesProcessed = leavesProcessed s + 1,
@@ -419,6 +422,20 @@ do_search maxdepth depth position current_line (alpha,beta) =
 						modify' $ \ s -> s { lastStateOutputTime = current_secs }
 					return $ (evalPosition position',[])			
 
+			cutoff <- case positionColourToMove position of
+				White -> case beta <= this_val of
+					False -> do
+						debug_here depth' "BETA CUTOFF: " current_line' alphabeta
+						modify' $ \ s -> s { betaCutoffs = betaCutoffs s + 1 }
+						return True
+					True -> return False
+				Black -> case this_val `isBetterThan` alpha of
+					False -> do
+						debug_here depth' "ALPHA CUTOFF: " current_line' alphabeta
+						modify' $ \ s -> s { alphaCutoffs = alphaCutoffs s + 1 }
+						return True
+					True -> return False
+
 			best'@(best_val',_) <- case this_val `isBetterThan` best_val of
 				True -> do
 					modify' $ \ s -> s {
@@ -427,18 +444,6 @@ do_search maxdepth depth position current_line (alpha,beta) =
 						bestLineUpdates = bestLineUpdates s + 1 }
 					return (this_val,move:this_subline)
 				False -> return best
-
-			cutoff <- case positionColourToMove position of
-				White -> case best_val' `isBetterThan` beta || best_val'==beta of
-					True -> do
-						modify' $ \ s -> s { betaCutoffs = betaCutoffs s + 1 }
-						return True
-					False -> return False
-				Black -> case alpha `isBetterThan` best_val' || best_val'==alpha of
-					True -> do
-						modify' $ \ s -> s { alphaCutoffs = alphaCutoffs s + 1 }
-						return True
-					False -> return False
 
 			debug_here depth' (printf "AFTER COMPARISON: BEST was %+.2f, THIS is %+.2f" best_val this_val) current_line' alphabeta
 
