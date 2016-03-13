@@ -403,11 +403,8 @@ do_search maxdepth depth position current_line (alpha,beta) =
 			debug_here depth' ("CURRENT MOVE: " ++ showMove_FromTo move) current_line' alphabeta
 			modify' $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
 
-			let alphabeta' = case positionColourToMove position of
-				White -> (best_val,beta)
-				Black -> (alpha,best_val)
 			(this_val,this_subline) <- case depth' < maxdepth of
-				True -> do_search maxdepth depth' position' current_line' alphabeta'
+				True -> do_search maxdepth depth' position' current_line' alphabeta
 				False -> do
 					modify' $ \ s -> s {
 						leavesProcessed = leavesProcessed s + 1,
@@ -421,6 +418,10 @@ do_search maxdepth depth position current_line (alpha,beta) =
 							(100.0 * comp_progress [] (reverse $ computationProgress s)) (bestVal s) (showLine (bestLine s))
 						modify' $ \ s -> s { lastStateOutputTime = current_secs }
 					return $ (evalPosition position',[])			
+
+			let alphabeta' = case positionColourToMove position of
+				White -> (best_val,beta)
+				Black -> (alpha,best_val)
 
 			cutoff <- case positionColourToMove position of
 				White -> case beta <= this_val of
