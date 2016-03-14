@@ -28,7 +28,7 @@ nextColour Black = White
 coloursToMove = iterate nextColour White
 
 data PieceType = Pawn | Knight | Bishop | Rook | Queen | King
-	deriving (Show,Eq,Enum,Ord)
+	deriving (Show,Eq,Enum,Ord,Ix)
 
 type Piece = (Colour,PieceType)
 
@@ -377,7 +377,8 @@ do_search maxdepth depth position current_line (alpha,beta) =
 	case moveGenerator position of
 		Left _ -> return (evalPosition position,[])
 		Right [] -> error "The impossible happened: Move generator returned empty move list!"
-		Right moves -> do
+		Right unsorted_moves -> do
+			let moves = sortBy comp_moves unsorted_moves
 			modify' $ \ s -> s { computationProgress = (0,length moves) : computationProgress s }
 			res <- find_best_line (worst_val,[]) moves (alpha,beta)
 			debug_here depth ("find_best_line returned " ++ show res) current_line (alpha,beta)
@@ -386,6 +387,11 @@ do_search maxdepth depth position current_line (alpha,beta) =
 			return res
 
 		where
+
+		comp_moves m1 m2 = compare (v m2) (v m1)
+			where
+			piecetypeval_at coors = let Just (_,piecetype) = board!coors in 1 + index (Pawn,King) piecetype
+			v (Move from to mb_takes mb_promote) = maybe 0 piecetypeval_at mb_takes1
 
 		(worst_val,isBetterThan,accum_fun) = case positionColourToMove position of
 			White -> (alpha,(>),max)
