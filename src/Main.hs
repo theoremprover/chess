@@ -276,7 +276,7 @@ showMoves pos moves = showline moves where
 
 main = do
 --	writeFile "test.txt" ""
-	loop 2 testPosition
+	loop 4 testPosition
 
 loop depth pos = do
 	putStrConsoleLn "\n==================================\n"
@@ -341,7 +341,7 @@ data SearchState = SearchState {
 	betaCutoffs         :: Int,
 	computationProgress :: [(Int,Int)] }
 	deriving (Show)
-initialSearchState = SearchState True 0 0 0 0 0 [] 0.0 0 0 []
+initialSearchState = SearchState False 0 0 0 0 0 [] 0.0 0 0 []
 
 showSearchState s = printf "Tot. %i Nodes, %i Leaves, %i Evals, bestLineUpdates=%i, alpha/betaCutoffs=%i/%i"
 	(nodesProcessed s) (leavesProcessed s) (evaluationsDone s) (bestLineUpdates s) (alphaCutoffs s) (betaCutoffs s)
@@ -387,9 +387,9 @@ do_search maxdepth depth position current_line (alpha,beta) =
 
 		where
 
-		(worst_val,isBetterThan) = case positionColourToMove position of
-			White -> (alpha,(>))
-			Black -> (beta,(<))
+		(worst_val,isBetterThan,accum_fun) = case positionColourToMove position of
+			White -> (alpha,(>),max)
+			Black -> (beta,(<),min)
 
 		find_best_line :: (Rating,[Move]) -> [Move] -> (Rating,Rating) -> SearchMonad (Rating,[Move])
 		find_best_line best [] alphabeta = do
@@ -414,28 +414,12 @@ do_search maxdepth depth position current_line (alpha,beta) =
 					TOD current_secs _ <- liftIO $ getClockTime
 					when (current_secs - last_output_secs >=1) $ do
 						s <- get
-						liftIO $ putStrConsoleLn $ printf "[%3.0f%%] Best line: %+.2f  <-  %s"
-							(100.0 * comp_progress [] (reverse $ computationProgress s)) (bestVal s) (showLine (bestLine s))
+						liftIO $ putStrConsoleLn $ printf "[%3.0f%%]  Cutoffs:%i/%i  Best line: %+.2f  <-  %s"
+							(100.0 * comp_progress [] (reverse $ computationProgress s))
+							(alphaCutoffs s) (betaCutoffs s)
+							(bestVal s) (showLine (bestLine s))
 						modify' $ \ s -> s { lastStateOutputTime = current_secs }
 					return $ (evalPosition position',[])			
-
-			let alphabeta' = case positionColourToMove position of
-				White -> (best_val,beta)
-				Black -> (alpha,best_val)
-
-			cutoff <- case positionColourToMove position of
-				White -> case beta <= this_val of
-					False -> do
-						debug_here depth' "BETA CUTOFF: " current_line' alphabeta
-						modify' $ \ s -> s { betaCutoffs = betaCutoffs s + 1 }
-						return True
-					True -> return False
-				Black -> case this_val `isBetterThan` alpha of
-					False -> do
-						debug_here depth' "ALPHA CUTOFF: " current_line' alphabeta
-						modify' $ \ s -> s { alphaCutoffs = alphaCutoffs s + 1 }
-						return True
-					True -> return False
 
 			best'@(best_val',_) <- case this_val `isBetterThan` best_val of
 				True -> do
@@ -448,6 +432,22 @@ do_search maxdepth depth position current_line (alpha,beta) =
 
 			debug_here depth' (printf "AFTER COMPARISON: BEST was %+.2f, THIS is %+.2f" best_val this_val) current_line' alphabeta
 
+			let alphabeta'@(alpha',beta') = case positionColourToMove position of
+				White -> (accum_fun best_val alpha,beta)
+				Black -> (alpha,accum_fun best_val beta)
+
+			cutoff <- case beta' <= alpha' of
+				False -> return False
+				True -> do
+					case positionColourToMove position of
+						White -> do
+							debug_here depth' "BETA CUTOFF: " current_line' alphabeta
+							modify' $ \ s -> s { betaCutoffs = betaCutoffs s + 1 }
+						Black -> do
+							debug_here depth' "ALPHA CUTOFF: " current_line' alphabeta
+							modify' $ \ s -> s { alphaCutoffs = alphaCutoffs s + 1 }
+					return True
+
 			modify' $ \ s -> s { computationProgress = let ((i,n):ps) = computationProgress s in (i+1,n):ps }
 
-			find_best_line best' (if cutoff then [] else moves) alphabeta
+			find_best_line best' (if cutoff then [] else moves) alphabeta'
