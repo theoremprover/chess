@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections,ScopedTypeVariables,RecordWildCards,FlexibleContexts #-}
+{-# LANGUAGE TupleSections,ScopedTypeVariables,RecordWildCards,FlexibleContexts,UnicodeSyntax #-}
 
 module Main where
 
@@ -11,6 +11,7 @@ import Data.NumInstances
 import Data.Tuple
 import Control.Monad.State.Strict
 import Data.Char
+import Data.Ord
 import System.Time
 import Debug.Trace
 
@@ -26,6 +27,8 @@ data Colour = White | Black
 nextColour White = Black
 nextColour Black = White
 coloursToMove = iterate nextColour White
+
+data Test = Ā | Ą deriving Show
 
 data PieceType = Pawn | Knight | Bishop | Rook | Queen | King
 	deriving (Show,Eq,Enum,Ord,Ix)
@@ -291,7 +294,7 @@ loop depth pos = do
 			return ()
 		Right moves -> do
 			putStrConsoleLn "\nPossible moves:"
-			showMoves pos moves
+--			showMoves pos moves
 			putStrConsoleLn $ intercalate "  " (map showMove_FromTo moves)
 			putStrConsoleLn "\nEnter command:\n> "
 			s <- getLine
@@ -337,14 +340,14 @@ data SearchState = SearchState {
 	lastStateOutputTime :: Integer,
 	bestLine            :: [Move],
 	bestVal             :: Rating,
-	alphaCutoffs        :: Int,
-	betaCutoffs         :: Int,
+	αCutoffs            :: Int,
+	βCutoffs            :: Int,
 	computationProgress :: [(Int,Int)] }
 	deriving (Show)
 initialSearchState = SearchState False 0 0 0 0 0 [] 0.0 0 0 []
 
-showSearchState s = printf "Tot. %i Nodes, %i Leaves, %i Evals, bestLineUpdates=%i, alpha/betaCutoffs=%i/%i"
-	(nodesProcessed s) (leavesProcessed s) (evaluationsDone s) (bestLineUpdates s) (alphaCutoffs s) (betaCutoffs s)
+showSearchState s = printf "Tot. %i Nodes, %i Leaves, %i Evals, bestLineUpdates=%i, α/β-Cutoffs=%i/%i"
+	(nodesProcessed s) (leavesProcessed s) (evaluationsDone s) (bestLineUpdates s) (αCutoffs s) (βCutoffs s)
 
 comp_progress _ [] = 0.0 :: Float
 comp_progress ts ((i,n):ins) = product ts * fromIntegral i / fromIntegral n + comp_progress ((1 / fromIntegral n):ts) ins
@@ -354,7 +357,7 @@ type SearchMonad a = StateT SearchState IO a
 search :: Depth -> Position -> SearchMonad (Rating,[Move])
 search maxdepth position = do_search maxdepth 0 position [] (-mAX_RATING,mAX_RATING)
 
-debug_here depth str current_line alphabeta = do
+debug_here depth str current_line αβ = do
 	s <- get
 	when (debugMode s) $ do
 		input <- liftIO $ do
@@ -363,8 +366,8 @@ debug_here depth str current_line alphabeta = do
 			putStrConsoleLn $ "Best Line: " ++ showLine (bestLine s)
 			putStrConsoleLn $ "Computation Progress: " ++ show (computationProgress s)
 			putStrConsoleLn $ "Current Line: " ++ showLine current_line
-			putStrConsoleLn $ "(alpha,beta) = " ++ show alphabeta
-			putStrConsoleLn $ printf "alphacutoffs = %i, betacutoffs = %i" (alphaCutoffs s) (betaCutoffs s)
+			putStrConsoleLn $ "(α,β) = " ++ show αβ
+			putStrConsoleLn $ printf "αcutoffs = %i, βcutoffs = %i" (αCutoffs s) (βCutoffs s)
 			putStrConsoleLn $ "============================"
 			putStrConsoleLn "Press Enter or 'd0'"
 			getLine
@@ -373,44 +376,45 @@ debug_here depth str current_line alphabeta = do
 			_ -> return ()
 
 do_search :: Depth -> Depth -> Position -> [Move] -> (Rating,Rating) -> SearchMonad (Rating,[Move])
-do_search maxdepth depth position current_line (alpha,beta) = 
+do_search maxdepth depth position current_line (α,β) = 
 	case moveGenerator position of
-		Left _ -> return (evalPosition position,[])
+		Left  _  -> return (evalPosition position,[])
 		Right [] -> error "The impossible happened: Move generator returned empty move list!"
 		Right unsorted_moves -> do
-			let moves = sortBy comp_moves unsorted_moves
+			let moves = sortBy (comparing move_sort_val) unsorted_moves
 			modify' $ \ s -> s { computationProgress = (0,length moves) : computationProgress s }
-			res <- find_best_line (worst_val,[]) moves (alpha,beta)
-			debug_here depth ("find_best_line returned " ++ show res) current_line (alpha,beta)
+			res <- find_best_line (worst_val,[]) moves (α,β)
+			debug_here depth ("find_best_line returned " ++ show res) current_line (α,β)
 			modify' $ \ s -> s { computationProgress = tail (computationProgress s) }
-			debug_here depth "AFTER FIND_BEST_LINE" current_line (alpha,beta)
+			debug_here depth "AFTER FIND_BEST_LINE" current_line (α,β)
 			return res
 
 		where
 
-		comp_moves m1 m2 = compare (v m2) (v m1)
+		move_sort_val (Move from to mb_takes mb_promote) =
+			maybe 0 (\ c -> max 1 (piecetypeval_at c - piecetypeval_at from)) mb_takes +
+			maybe 0 (const 10) mb_promote
 			where
-			piecetypeval_at coors = let Just (_,piecetype) = board!coors in 1 + index (Pawn,King) piecetype
-			v (Move from to mb_takes mb_promote) = maybe 0 piecetypeval_at mb_takes1
+			piecetypeval_at coors = let Just (_,piecetype) = (positionBoard position)!coors in 1 + index (Pawn,King) piecetype
 
 		(worst_val,isBetterThan,accum_fun) = case positionColourToMove position of
-			White -> (alpha,(>),max)
-			Black -> (beta,(<),min)
+			White -> (α,(>),max)
+			Black -> (β,(<),min)
 
 		find_best_line :: (Rating,[Move]) -> [Move] -> (Rating,Rating) -> SearchMonad (Rating,[Move])
-		find_best_line best [] alphabeta = do
-			debug_here depth ("find_best_line [] returned " ++ show best) current_line alphabeta
+		find_best_line best [] (α,β) = do
+			debug_here depth ("find_best_line [] returned " ++ show best) current_line (α,β)
 			return best
-		find_best_line best@(best_val,best_line) (move:moves) alphabeta@(alpha,beta) = do
+		find_best_line best@(best_val,best_line) (move:moves) (α,β) = do
 			let
 				current_line' = current_line ++ [move]
 				depth' = depth + 1
 				position' = doMove position move
-			debug_here depth' ("CURRENT MOVE: " ++ showMove_FromTo move) current_line' alphabeta
+			debug_here depth' ("CURRENT MOVE: " ++ showMove_FromTo move) current_line' (α,β)
 			modify' $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
 
 			(this_val,this_subline) <- case depth' < maxdepth of
-				True -> do_search maxdepth depth' position' current_line' alphabeta
+				True -> do_search maxdepth depth' position' current_line' (α,β)
 				False -> do
 					modify' $ \ s -> s {
 						leavesProcessed = leavesProcessed s + 1,
@@ -422,7 +426,7 @@ do_search maxdepth depth position current_line (alpha,beta) =
 						s <- get
 						liftIO $ putStrConsoleLn $ printf "[%3.0f%%]  Cutoffs:%i/%i  Best line: %+.2f  <-  %s"
 							(100.0 * comp_progress [] (reverse $ computationProgress s))
-							(alphaCutoffs s) (betaCutoffs s)
+							(αCutoffs s) (βCutoffs s)
 							(bestVal s) (showLine (bestLine s))
 						modify' $ \ s -> s { lastStateOutputTime = current_secs }
 					return $ (evalPosition position',[])			
@@ -436,24 +440,24 @@ do_search maxdepth depth position current_line (alpha,beta) =
 					return (this_val,move:this_subline)
 				False -> return best
 
-			debug_here depth' (printf "AFTER COMPARISON: BEST was %+.2f, THIS is %+.2f" best_val this_val) current_line' alphabeta
+			debug_here depth' (printf "AFTER COMPARISON: BEST was %+.2f, THIS is %+.2f" best_val this_val) current_line' (α,β)
 
-			let alphabeta'@(alpha',beta') = case positionColourToMove position of
-				White -> (accum_fun best_val alpha,beta)
-				Black -> (alpha,accum_fun best_val beta)
+			let (α',β') = case positionColourToMove position of
+				White -> (accum_fun best_val α,β)
+				Black -> (α,accum_fun best_val β)
 
-			cutoff <- case beta' <= alpha' of
+			cutoff <- case β' <= α' of
 				False -> return False
 				True -> do
 					case positionColourToMove position of
 						White -> do
-							debug_here depth' "BETA CUTOFF: " current_line' alphabeta
-							modify' $ \ s -> s { betaCutoffs = betaCutoffs s + 1 }
+							debug_here depth' "β CUTOFF: " current_line' (α,β)
+							modify' $ \ s -> s { βCutoffs = βCutoffs s + 1 }
 						Black -> do
-							debug_here depth' "ALPHA CUTOFF: " current_line' alphabeta
-							modify' $ \ s -> s { alphaCutoffs = alphaCutoffs s + 1 }
+							debug_here depth' "α CUTOFF: " current_line' (α,β)
+							modify' $ \ s -> s { αCutoffs = αCutoffs s + 1 }
 					return True
 
 			modify' $ \ s -> s { computationProgress = let ((i,n):ps) = computationProgress s in (i+1,n):ps }
 
-			find_best_line best' (if cutoff then [] else moves) alphabeta'
+			find_best_line best' (if cutoff then [] else moves) (α',β')
