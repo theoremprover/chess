@@ -28,29 +28,43 @@ nextColour White = Black
 nextColour Black = White
 coloursToMove = iterate nextColour White
 
-data PieceType = Pawn | Knight | Bishop | Rook | Queen | King
+data PieceType = Ù | Ú | Û | Ü | Ý | Þ
 	deriving (Show,Eq,Enum,Ord,Ix)
 
 type Piece = (Colour,PieceType)
 
 type Board = Array Coors (Maybe Piece)
 
-initialBoard = array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] [
-	b Rook ,b Knight,b Bishop,b Queen,b King, b Bishop,b Knight,b Rook ,
-	b Pawn ,b Pawn  ,b Pawn  ,b Pawn ,b Pawn ,b Pawn  ,b Pawn  ,b Pawn ,
-	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	w Pawn ,w Pawn  ,w Pawn  ,w Pawn ,w Pawn ,w Pawn  ,w Pawn  ,w Pawn ,
-	w Rook ,w Knight,w Bishop,w Queen,w King, w Bishop,w Knight,w Rook ]
+stringToPosition col_to_move s = Position [] (array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] (map tofig (concat s))) col_to_move
 	where
-	w = Just . (White,)
-	b = Just . (Black,)
+	tofig c | c >= 'ç' = tofig (chr $ ord c - ord 'ç' + ord 'Ø')
+	tofig 'Ø' = Nothing
+	tofig c = Just (toEnum (div i 6),toEnum (mod i 6)) where
+		i = ord c - ord 'Ù'
+
+piece_attic = "ØÙÚÛÜÝÞßàáâãäçèéêëìíîïðñòó"
+testPosition = stringToPosition White [
+	"çØçØóâçÜ",
+	"ØîØçØçØç",
+	"çØçØçØçØ",
+	"ÙçØçØçØç",
+	"çØçØçØçØ",
+	"ØçØçØçØç",
+	"çØçØçØçØ",
+	"ÜçØçÞçØç" ]
+
+initialPosition = stringToPosition White [
+	"âïáòäðàñ",
+	"îßîßîßîß",
+	"ØçØçØçØç",
+	"çØçØçØçØ",
+	"ØçØçØçØç",
+	"çØçØçØçØ",
+	"ÙèÙèÙèÙè",
+	"ëÚêÝíÛéÜ" ]
 
 data Position = Position {
 	positionMoves :: [Move], positionBoard::Board, positionColourToMove::Colour }
-initialPosition = Position [] initialBoard White
 
 data Move = Move {
 	moveFrom :: Coors, moveTo :: Coors, moveTakes :: Maybe Coors, movePromote :: Maybe PieceType }
@@ -66,8 +80,8 @@ doMove (Position moves board colour) move@(Move from to mb_take mb_promotion) =
 			Just promoted -> Just (my_colour,promoted) where
 				Just (my_colour,_) = board!from ) :
 		case (from,to,board!from) of
-			((5,r),(7,_),(Just (colour,King))) -> [ ((8,r),Nothing),((6,r),Just (colour,Rook)) ]
-			((5,r),(3,_),(Just (colour,King))) -> [ ((1,r),Nothing),((4,r),Just (colour,Rook)) ]
+			((5,r),(7,_),(Just (colour,Þ))) -> [ ((8,r),Nothing),((6,r),Just (colour,Ü)) ]
+			((5,r),(3,_),(Just (colour,Þ))) -> [ ((1,r),Nothing),((4,r),Just (colour,Ü)) ]
 			_ -> [] ))
 		(nextColour colour)
 
@@ -86,25 +100,25 @@ type EndingOrMoves = Either MatchEnding [Move]
 moveGenerator :: Position -> EndingOrMoves
 moveGenerator position@(Position moves board colour_to_move) =
 	case sort $ map swap $ catMaybes $ elems board of
-		[ (King,_),(King,_) ] -> Left Remis
-		[ (fig,_),(King,_),(King,_) ] | fig `elem` [Knight,Bishop] -> Left Remis
-		[ (fig1,col1),(fig2,col2),(King,_),(King,_) ] | col1 /= col2 &&
-			fig1 `elem` [Knight,Bishop] && fig2 `elem` [Knight,Bishop] -> Left Remis
+		[ (Þ,_),(Þ,_) ] -> Left Remis
+		[ (fig,_),(Þ,_),(Þ,_) ] | fig `elem` [Ú,Û] -> Left Remis
+		[ (fig1,col1),(fig2,col2),(Þ,_),(Þ,_) ] | col1 /= col2 &&
+			fig1 `elem` [Ú,Û] && fig2 `elem` [Ú,Û] -> Left Remis
 
 		_ -> case filter (king_no_check position) $ [ Move from to mb_take mb_promotion |
 				(piecetype,(from,(to,mb_take))) <- move_targets position,
 				mb_promotion <- case (piecetype,to) of
-					(Pawn,(_,r)) | r == 10 - pawnInitialRank colour_to_move -> map Just [Knight,Bishop,Rook,Queen]
+					(Ù,(_,r)) | r == 10 - pawnInitialRank colour_to_move -> map Just [Ú,Û,Ü,Ý]
 					_ -> [Nothing] ] ++
 				( case map ((board!).(,castle_rank)) [5..8] of
-					[ Just (kingcol,King),Nothing,Nothing,Just (rookcol,Rook) ] |
+					[ Just (kingcol,Þ),Nothing,Nothing,Just (rookcol,Ü) ] |
 						kingcol==colour_to_move && rookcol==colour_to_move &&
 						all (no_check position) (map (,castle_rank) [5..6]) &&
 						all (\ (Move f _ _ _) -> f /= (5,castle_rank) && f /= (8,castle_rank)) moves ->
 							[ Move (5,castle_rank) (7,castle_rank) Nothing Nothing ]
 					_ -> [] ) ++
 				( case map ((board!).(,castle_rank)) [1..5] of
-					[ Just (rookcol,Rook),Nothing,Nothing,Nothing,Just (kingcol,King) ] |
+					[ Just (rookcol,Ü),Nothing,Nothing,Nothing,Just (kingcol,Þ) ] |
 						kingcol==colour_to_move && rookcol==colour_to_move &&
 						all (no_check position) (map (,castle_rank) [4..5]) &&
 						all (\ (Move f _ _ _) -> f /= (1,castle_rank) && f /= (5,castle_rank)) moves ->
@@ -125,26 +139,26 @@ move_targets position@(Position moves board colour_to_move) = [ (piecetype,(from
 	(from,Just (colour,piecetype)) <- assocs board,
 	colour==colour_to_move,
 	target <- case (piecetype,from) of
-		(Pawn,(_,r)) ->
+		(Ù,(_,r)) ->
 			filter (isNothing.snd) (dir_targets from (pawn_dir,if r==pawn_initial_rank then 2 else 1)) ++
 			filter (isJust.snd) (concatMap (dir_targets from) [(pawn_dir+west,1),(pawn_dir+east,1)]) ++
 			[ (abs_to,Just take) | r == pawnEnPassantRank colour_to_move, eastwest <- [east,west],
 				Just abs_to <- [ addrelcoors from (pawn_dir+eastwest) ],
 				Nothing <- [ board!abs_to ],
 				Just take <- [ addrelcoors from eastwest ],
-				Just (col,Pawn) <- [ board!take ],
+				Just (col,Ù) <- [ board!take ],
 				Just pawn_from <- [ addrelcoors from (pawn_dir*2+eastwest) ],
 				(Move last_from last_to Nothing Nothing):_ <- [ reverse moves ],
 				last_from==pawn_from, last_to==take,
 				col == nextColour colour_to_move ]
 		_ -> concatMap (dir_targets from) $ case piecetype of
-			Knight -> map (,1) [
+			Ú -> map (,1) [
 				north*2+east,north*2+west,east*2+north,east*2+south,
 				south*2+east,south*2+west,west*2+north,west*2+south ]
-			Bishop -> map (,7) diagonal
-			Rook   -> map (,7) straight
-			Queen  -> map (,7) (straight++diagonal)
-			King   -> map (,1) (straight++diagonal) ]
+			Û -> map (,7) diagonal
+			Ü -> map (,7) straight
+			Ý -> map (,7) (straight++diagonal)
+			Þ -> map (,1) (straight++diagonal) ]
 	where
 
 	pawn_initial_rank = pawnInitialRank colour_to_move
@@ -174,12 +188,12 @@ evalPosition pos@Position{..} = case moveGenerator pos of
 		where
 		piece_val (coors@(f,r),(colour,piecetype)) = (if colour == White then id else negate) (
 			case piecetype of
-				Pawn   -> 1.0 + 0.1 * fromIntegral (6 - abs (r-pawn_targetrank)) + 0.10*num_moves
-				Knight -> 3.0 + 0.10*proximity_to_centre +                         0.04*num_moves
-				Bishop -> 3.0 + 0.10*proximity_to_centre +                         0.02*num_moves
-				Rook   -> 5.0 +                                                    0.02*num_moves
-				Queen  -> 9.0 + 0.10*proximity_to_centre +                         0.01*num_moves
-				King   -> 10000.0 ) :: Rating
+				Ù -> 1.0 + 0.1 * fromIntegral (6 - abs (r-pawn_targetrank)) + 0.10*num_moves
+				Ú -> 3.0 + 0.10*proximity_to_centre +                         0.04*num_moves
+				Û -> 3.0 + 0.10*proximity_to_centre +                         0.02*num_moves
+				Ü -> 5.0 +                                                    0.02*num_moves
+				Ý -> 9.0 + 0.10*proximity_to_centre +                         0.01*num_moves
+				Þ -> 10000.0 ) :: Rating
 			where
 			num_moves = fromIntegral (length (filter (==coors) $ map moveFrom moves))
 			pawn_targetrank = if colour==White then 8 else 1
@@ -190,44 +204,15 @@ putStrConsoleLn s = do
 --	appendFile "test.txt" (s++"\n")
 
 showPos (Position moves board colour) = do
-	putStrConsoleLn $ "\xbf" ++ replicate 8 '\xc0' ++ "\xc1"
+	putStrConsoleLn $ "¿" ++ replicate 8 'À' ++ "Á"
 	forM_ [8,7..1] $ \ rank -> do
 		line <- forM [1..8] $ \ file -> do
-			return $ toEnum $ 0xd7 + mod (file+rank) 2 * 15 + case board!(file,rank) of
+			return $ toEnum $ 0xd8 + mod (file+rank) 2 * 15 + case board!(file,rank) of
 				Nothing             -> 0
 				Just (colour,piece) -> 1 + fromEnum colour * 6 + fromEnum piece
-		putStrConsoleLn $ [toEnum $ 0xc6 + rank ] ++ line ++ "\xc3"
-	putStrConsoleLn $ "\xc4" ++ map (toEnum.(+0xce)) [1..8] ++ "\xc6"
+		putStrConsoleLn $ [toEnum $ 0xc6 + rank ] ++ line ++ "Ã"
+	putStrConsoleLn $ "Ä" ++ map (toEnum.(+0xce)) [1..8] ++ "Æ"
 	putStrConsoleLn $ show colour ++ " to move"
-
-{-
-testPosition = Position [] (array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] [
-	Nothing,Nothing ,Nothing ,Nothing,b King, b Rook  ,Nothing ,w Rook ,
-	Nothing,b Pawn  ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	w Pawn ,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	w Rook ,Nothing ,Nothing ,Nothing ,w King,Nothing ,Nothing, w Rook ])
-	Black
-	where
-	w = Just . (White,)
-	b = Just . (Black,)
--}
-testPosition = Position [] (array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] [
-	Nothing,Nothing ,Nothing ,Nothing,b King, b Rook  ,Nothing ,w Rook ,
-	Nothing,b Pawn  ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	w Pawn ,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	Nothing,Nothing ,Nothing ,Nothing,Nothing,Nothing ,Nothing ,Nothing,
-	w Rook ,Nothing ,Nothing ,Nothing ,w King,Nothing ,Nothing, Nothing])
-	Black
-	where
-	w = Just . (White,)
-	b = Just . (Black,)
 
 showFile f = take 1 $ drop f " abcdefgh"
 showCoors (f,r) = showFile f ++ show r 
@@ -237,7 +222,7 @@ no_check pos coors = all (\ (_,(_,(to,_))) -> coors /= to) $
 	move_targets (pos { positionColourToMove = nextColour (positionColourToMove pos) })
 
 -- the position of the king of the player to move in this position
-kings_coors Position{..} = head [ coors | (coors,Just (col,King)) <- assocs positionBoard, col==positionColourToMove ]
+kings_coors Position{..} = head [ coors | (coors,Just (col,Þ)) <- assocs positionBoard, col==positionColourToMove ]
 
 -- would the king of the player to move in pos be in check after the move
 king_no_check pos move = no_check pos' (kings_coors pos') where
@@ -246,10 +231,10 @@ king_no_check pos move = no_check pos' (kings_coors pos') where
 showMove :: Position -> Move -> String
 showMove pos@Position{..} move@(Move from@(f0,r0) to mb_takes mb_promote) =
 	case (piecetype_at from,from,to) of
-		(King,(5,_),(7,_)) -> "O-O"
-		(King,(5,_),(3,_)) -> "O-O-O"
+		(Þ,(5,_),(7,_)) -> "O-O"
+		(Þ,(5,_),(3,_)) -> "O-O-O"
 		(piece_from,_,_) -> ( case mb_takes of
-			Just takes | takes/=to || piece_from == Pawn -> showFile f0
+			Just takes | takes/=to || piece_from == Ù -> showFile f0
 			_ ->
 				pieceStr piece_from ++
 				head ([ if f==f0 then show r0 else showFile f0 |
@@ -266,7 +251,7 @@ showMove pos@Position{..} move@(Move from@(f0,r0) to mb_takes mb_promote) =
 	piecetype_at coors = snd $ fromJust (positionBoard!coors)
 	pos' = doMove pos move
 
-pieceStr piecetype = fromJust $ lookup piecetype [(Pawn,""),(Knight,"N"),(Bishop,"B"),(Rook,"R"),(Queen,"Q"),(King,"K")]
+pieceStr piecetype = fromJust $ lookup piecetype [(Ù,""),(Ú,"N"),(Û,"B"),(Ü,"R"),(Ý,"Q"),(Þ,"K")]
 
 showMoves :: Position -> [Move] -> IO ()
 showMoves pos moves = showline moves where
@@ -395,7 +380,7 @@ do_search maxdepth depth position current_line (α,β) =
 			maybe 0 (\ c -> max 1 (piecetypeval_at c - piecetypeval_at from)) mb_takes +
 			maybe 0 (const 10) mb_promote
 			where
-			piecetypeval_at coors = let Just (_,piecetype) = (positionBoard position)!coors in 1 + index (Pawn,King) piecetype
+			piecetypeval_at coors = let Just (_,piecetype) = (positionBoard position)!coors in 1 + index (Ù,Þ) piecetype
 
 		(worst_val,isBetterThan,accum_fun) = case positionColourToMove position of
 			White -> (α,(>),max)
@@ -450,6 +435,7 @@ do_search maxdepth depth position current_line (α,β) =
 					[] -> do
 						debug_here depth ("find_best_line [] returned " ++ show best) current_line (α,β)
 						return (best,[]:killer_moves_line)
+					_  -> find_best_line best' moves (α,β)
 				True -> do
 					case positionColourToMove position of
 						White -> do
