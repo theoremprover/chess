@@ -28,8 +28,6 @@ nextColour White = Black
 nextColour Black = White
 coloursToMove = iterate nextColour White
 
-data Test = Ā | Ą deriving Show
-
 data PieceType = Pawn | Knight | Bishop | Rook | Queen | King
 	deriving (Show,Eq,Enum,Ord,Ix)
 
@@ -355,7 +353,9 @@ comp_progress ts ((i,n):ins) = product ts * fromIntegral i / fromIntegral n + co
 type SearchMonad a = StateT SearchState IO a
 
 search :: Depth -> Position -> SearchMonad (Rating,[Move])
-search maxdepth position = do_search maxdepth 0 position [] (-mAX_RATING,mAX_RATING)
+search maxdepth position = do
+	(res,_) <- do_search maxdepth 0 position [] (-mAX_RATING,mAX_RATING)
+	return res
 
 debug_here depth str current_line αβ = do
 	s <- get
@@ -375,19 +375,19 @@ debug_here depth str current_line αβ = do
 			"d0" -> modify' $ \ s -> s { debugMode = False }
 			_ -> return ()
 
-do_search :: Depth -> Depth -> Position -> [Move] -> (Rating,Rating) -> SearchMonad (Rating,[Move])
+do_search :: Depth -> Depth -> Position -> [Move] -> (Rating,Rating) -> SearchMonad ((Rating,[Move]),[[Move]])
 do_search maxdepth depth position current_line (α,β) = 
 	case moveGenerator position of
-		Left  _  -> return (evalPosition position,[])
+		Left  _  -> return ((evalPosition position,[]),[])
 		Right [] -> error "The impossible happened: Move generator returned empty move list!"
 		Right unsorted_moves -> do
 			let moves = sortBy (comparing move_sort_val) unsorted_moves
 			modify' $ \ s -> s { computationProgress = (0,length moves) : computationProgress s }
-			res <- find_best_line (worst_val,[]) moves (α,β)
+			(res,killer_moves_line) <- find_best_line (worst_val,[]) moves (α,β)
 			debug_here depth ("find_best_line returned " ++ show res) current_line (α,β)
 			modify' $ \ s -> s { computationProgress = tail (computationProgress s) }
 			debug_here depth "AFTER FIND_BEST_LINE" current_line (α,β)
-			return res
+			return (res,killer_moves_line)
 
 		where
 
@@ -401,10 +401,7 @@ do_search maxdepth depth position current_line (α,β) =
 			White -> (α,(>),max)
 			Black -> (β,(<),min)
 
-		find_best_line :: (Rating,[Move]) -> [Move] -> (Rating,Rating) -> SearchMonad (Rating,[Move])
-		find_best_line best [] (α,β) = do
-			debug_here depth ("find_best_line [] returned " ++ show best) current_line (α,β)
-			return best
+		find_best_line :: (Rating,[Move]) -> [Move] -> (Rating,Rating) -> SearchMonad ((Rating,[Move]),[[Move]])
 		find_best_line best@(best_val,best_line) (move:moves) (α,β) = do
 			let
 				current_line' = current_line ++ [move]
@@ -413,7 +410,7 @@ do_search maxdepth depth position current_line (α,β) =
 			debug_here depth' ("CURRENT MOVE: " ++ showMove_FromTo move) current_line' (α,β)
 			modify' $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
 
-			(this_val,this_subline) <- case depth' < maxdepth of
+			((this_val,this_subline),killer_moves_line) <- case depth' < maxdepth of
 				True -> do_search maxdepth depth' position' current_line' (α,β)
 				False -> do
 					modify' $ \ s -> s {
@@ -429,7 +426,7 @@ do_search maxdepth depth position current_line (α,β) =
 							(αCutoffs s) (βCutoffs s)
 							(bestVal s) (showLine (bestLine s))
 						modify' $ \ s -> s { lastStateOutputTime = current_secs }
-					return $ (evalPosition position',[])			
+					return $ ((evalPosition position',[]),[])			
 
 			best'@(best_val',_) <- case this_val `isBetterThan` best_val of
 				True -> do
@@ -446,8 +443,13 @@ do_search maxdepth depth position current_line (α,β) =
 				White -> (accum_fun best_val α,β)
 				Black -> (α,accum_fun best_val β)
 
-			cutoff <- case β' <= α' of
-				False -> return False
+			modify' $ \ s -> s { computationProgress = let ((i,n):ps) = computationProgress s in (i+1,n):ps }
+
+			case β' <= α' of
+				False -> case moves of
+					[] -> do
+						debug_here depth ("find_best_line [] returned " ++ show best) current_line (α,β)
+						return (best,[]:killer_moves_line)
 				True -> do
 					case positionColourToMove position of
 						White -> do
@@ -456,8 +458,4 @@ do_search maxdepth depth position current_line (α,β) =
 						Black -> do
 							debug_here depth' "α CUTOFF: " current_line' (α,β)
 							modify' $ \ s -> s { αCutoffs = αCutoffs s + 1 }
-					return True
-
-			modify' $ \ s -> s { computationProgress = let ((i,n):ps) = computationProgress s in (i+1,n):ps }
-
-			find_best_line best' (if cutoff then [] else moves) (α',β')
+					return (best,[move]:killer_moves_line)
