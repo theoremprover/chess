@@ -42,7 +42,6 @@ stringToPosition col_to_move s = Position [] (array ((1,1),(8,8)) $ zip [ (f,r) 
 	tofig c = Just (toEnum (div i 6),toEnum (mod i 6)) where
 		i = ord c - ord 'Ù'
 
-piece_attic = "ØÙÚÛÜÝÞßàáâãäçèéêëìíîïðñòó"
 testPosition = stringToPosition White [
 	"çØçØóâçÜ",
 	"ØîØçØçØç",
@@ -192,7 +191,7 @@ evalPosition pos@Position{..} = case moveGenerator pos of
 				Ú -> 3.0 + 0.10*proximity_to_centre +                         0.04*num_moves
 				Û -> 3.0 + 0.10*proximity_to_centre +                         0.02*num_moves
 				Ü -> 5.0 +                                                    0.02*num_moves
-				Ý -> 9.0 + 0.10*proximity_to_centre +                         0.01*num_moves
+				Ý -> 9.0 + 0.05*proximity_to_centre +                         0.01*num_moves
 				Þ -> 10000.0 ) :: Rating
 			where
 			num_moves = fromIntegral (length (filter (==coors) $ map moveFrom moves))
@@ -352,7 +351,7 @@ debug_here depth str current_line αβ = do
 			putStrConsoleLn $ "Computation Progress: " ++ show (computationProgress s)
 			putStrConsoleLn $ "Current Line: " ++ showLine current_line
 			putStrConsoleLn $ "(α,β) = " ++ show αβ
-			putStrConsoleLn $ printf "αcutoffs = %i, βcutoffs = %i" (αCutoffs s) (βCutoffs s)
+			putStrConsoleLn $ printf "αCutoffs = %i, βCutoffs = %i" (αCutoffs s) (βCutoffs s)
 			putStrConsoleLn $ "============================"
 			putStrConsoleLn "Press Enter or 'd0'"
 			getLine
