@@ -42,7 +42,7 @@ stringToPosition col_to_move s = Position [] (array ((1,1),(8,8)) $ zip [ (f,r) 
 	tofig c = Just (toEnum (div i 6),toEnum (mod i 6)) where
 		i = ord c - ord 'Ù'
 
-testPosition = stringToPosition White [
+testPosition = stringToPosition Black [
 	"çØçØóâçÜ",
 	"ØîØçØçØç",
 	"çØçØçØçØ",
@@ -363,11 +363,10 @@ do_search :: Depth -> Depth -> Position -> [Move] -> (Rating,Rating) -> SearchMo
 do_search maxdepth depth position current_line (α,β) = 
 	case moveGenerator position of
 		Left  _  -> return ((evalPosition position,[]),[])
-		Right [] -> error "The impossible happened: Move generator returned empty move list!"
 		Right unsorted_moves -> do
-			let moves = sortBy (comparing move_sort_val) unsorted_moves
+			let moves = reverse $ sortBy (comparing move_sort_val) unsorted_moves
 			modify' $ \ s -> s { computationProgress = (0,length moves) : computationProgress s }
-			(res,killer_moves_line) <- find_best_line (worst_val,[]) moves (α,β)
+			(res,killer_moves_line) <- find_best_line (worst_val,[]) moves (α,β) (repeat [])
 			debug_here depth ("find_best_line returned " ++ show res) current_line (α,β)
 			modify' $ \ s -> s { computationProgress = tail (computationProgress s) }
 			debug_here depth "AFTER FIND_BEST_LINE" current_line (α,β)
@@ -385,8 +384,8 @@ do_search maxdepth depth position current_line (α,β) =
 			White -> (α,(>),max)
 			Black -> (β,(<),min)
 
-		find_best_line :: (Rating,[Move]) -> [Move] -> (Rating,Rating) -> SearchMonad ((Rating,[Move]),[[Move]])
-		find_best_line best@(best_val,best_line) (move:moves) (α,β) = do
+		find_best_line :: (Rating,[Move]) -> [Move] -> (Rating,Rating) -> [[Move]] -> SearchMonad ((Rating,[Move]),[[Move]])
+		find_best_line best@(best_val,best_line) (move:moves) (α,β) killer_moves_acc = do
 			let
 				current_line' = current_line ++ [move]
 				depth' = depth + 1
@@ -394,7 +393,7 @@ do_search maxdepth depth position current_line (α,β) =
 			debug_here depth' ("CURRENT MOVE: " ++ showMove_FromTo move) current_line' (α,β)
 			modify' $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
 
-			((this_val,this_subline),killer_moves_line) <- case depth' < maxdepth of
+			((this_val,this_subline),sub_killer_moves) <- case depth' < maxdepth of
 				True -> do_search maxdepth depth' position' current_line' (α,β)
 				False -> do
 					modify' $ \ s -> s {
@@ -429,12 +428,14 @@ do_search maxdepth depth position current_line (α,β) =
 
 			modify' $ \ s -> s { computationProgress = let ((i,n):ps) = computationProgress s in (i+1,n):ps }
 
+			let killer_moves_acc' = map nub $ zipWith (++) sub_killer_moves killer_moves_acc
+
 			case β' <= α' of
 				False -> case moves of
 					[] -> do
 						debug_here depth ("find_best_line [] returned " ++ show best) current_line (α,β)
-						return (best,[]:killer_moves_line)
-					_  -> find_best_line best' moves (α,β)
+						return (best,[]:killer_moves_acc')
+					_  -> find_best_line best' moves (α,β) killer_moves_acc'
 				True -> do
 					case positionColourToMove position of
 						White -> do
@@ -443,4 +444,4 @@ do_search maxdepth depth position current_line (α,β) =
 						Black -> do
 							debug_here depth' "α CUTOFF: " current_line' (α,β)
 							modify' $ \ s -> s { αCutoffs = αCutoffs s + 1 }
-					return (best,[move]:killer_moves_line)
+					return (best,[move]:killer_moves_acc')
