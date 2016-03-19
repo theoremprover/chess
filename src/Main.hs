@@ -35,7 +35,8 @@ type Piece = (Colour,PieceType)
 
 type Board = Array Coors (Maybe Piece)
 
-stringToPosition col_to_move s = Position [] (array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] (map tofig (concat s))) col_to_move
+stringToPosition col_to_move s = Position [] (array ((1,1),(8,8)) $
+	zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] (map tofig (concat s))) col_to_move
 	where
 	tofig c | c >= 'ç' = tofig (chr $ ord c - ord 'ç' + ord 'Ø')
 	tofig 'Ø' = Nothing
@@ -94,32 +95,35 @@ pawnDir colour = if colour==White then north else south
 pawnInitialRank colour = if colour==White then 2 else 7
 pawnEnPassantRank colour = if colour==White then 5 else 4
 
-moveGenerator :: Position -> [Move]
+moveGenerator :: Position -> Either MatchEnding [Move]
 moveGenerator position@(Position moves board colour_to_move) =
-	case filter (king_no_check position) $ [ Move from to mb_take mb_promotion |
-		(piecetype,(from,(to,mb_take))) <- move_targets position,
-		mb_promotion <- case (piecetype,to) of
-			(Ù,(_,r)) | r == 10 - pawnInitialRank colour_to_move -> map Just [Ú,Û,Ü,Ý]
-			_ -> [Nothing] ] ++
-		( case map ((board!).(,castle_rank)) [5..8] of
-			[ Just (kingcol,Þ),Nothing,Nothing,Just (rookcol,Ü) ] |
-				kingcol==colour_to_move && rookcol==colour_to_move &&
-				all (no_check position) (map (,castle_rank) [5..6]) &&
-				all (\ (Move f _ _ _) -> f /= (5,castle_rank) && f /= (8,castle_rank)) moves ->
-					[ Move (5,castle_rank) (7,castle_rank) Nothing Nothing ]
-			_ -> [] ) ++
-		( case map ((board!).(,castle_rank)) [1..5] of
-			[ Just (rookcol,Ü),Nothing,Nothing,Nothing,Just (kingcol,Þ) ] |
-				kingcol==colour_to_move && rookcol==colour_to_move &&
-				all (no_check position) (map (,castle_rank) [4..5]) &&
-				all (\ (Move f _ _ _) -> f /= (1,castle_rank) && f /= (5,castle_rank)) moves ->
-					[ Move (5,castle_rank) (3,castle_rank) Nothing Nothing ]
-			_ -> [] )
-	of
-	[] -> Left $ case no_check position (kings_coors position) of
-		True  -> Stalemate colour_to_move
-		False -> Checkmate colour_to_move
-	moves -> Right moves
+	case sort $ map swap $ catMaybes $ elems board of
+		[ (Þ,_),(Þ,_) ] -> Left Remis
+		[ (f,_),(Þ,_),(Þ,_) ] | f `elem` [Ú,Û] -> Left Remis
+		[ (f,col1),(g,col2),(Þ,_),(Þ,_) ] | col1 /= col2 &&
+			f `elem` [Ú,Û] && g `elem` [Ú,Û] -> Left Remis
+		_ -> case filter (king_no_check position) $ [ Move from to mb_take mb_promotion |
+			(piecetype,(from,(to,mb_take))) <- move_targets position,
+			mb_promotion <- case (piecetype,to) of
+				(Ù,(_,r)) | r == 10 - pawnInitialRank colour_to_move -> map Just [Ú,Û,Ü,Ý]
+				_ -> [Nothing] ] ++
+			( case map ((board!).(,castle_rank)) [5..8] of
+				[ Just (kingcol,Þ),Nothing,Nothing,Just (rookcol,Ü) ] |
+					kingcol==colour_to_move && rookcol==colour_to_move &&
+					all (no_check position) [(5,castle_rank),(6,castle_rank)] &&
+					all (\ (Move f _ _ _) -> f /= (5,castle_rank) && f /= (8,castle_rank)) moves ->
+						[ Move (5,castle_rank) (7,castle_rank) Nothing Nothing ]
+				_ -> [] ) ++
+			( case map ((board!).(,castle_rank)) [1..5] of
+				[ Just (rookcol,Ü),Nothing,Nothing,Nothing,Just (kingcol,Þ) ] |
+					kingcol==colour_to_move && rookcol==colour_to_move &&
+					all (no_check position) [(4,castle_rank),(5,castle_rank)] &&
+					all (\ (Move f _ _ _) -> f /= (1,castle_rank) && f /= (5,castle_rank)) moves ->
+						[ Move (5,castle_rank) (3,castle_rank) Nothing Nothing ]
+				_ -> [] )
+			of
+			[] -> Left $ (if no_check position (kings_coors position) then Stalemate else Checkmate) colour_to_move
+			moves -> Right moves
 
 	where
 
@@ -171,12 +175,7 @@ type Rating = Float
 mAX_RATING = 1000000.0 :: Rating
 
 evalPosition :: Position -> Rating
-evalPosition pos@Position{..} = case sort $ map swap $ catMaybes $ elems positionBoard of
-	[ (Þ,_),(Þ,_) ] -> Left Remis
-	[ (f,_),(Þ,_),(Þ,_) ] | fig `elem` [Ú,Û] -> Left Remis
-	[ (f,col1),(g,col2),(Þ,_),(Þ,_) ] | col1 /= col2 &&
-		f `elem` [Ú,Û] && g `elem` [Ú,Û] -> Left Remis
-	_ -> case moveGenerator pos of
+evalPosition pos@Position{..} = case moveGenerator pos of
 	Left ending -> case ending of
 		Checkmate colour -> (if colour==White then negate else id) mAX_RATING
 		_                -> 0.0
