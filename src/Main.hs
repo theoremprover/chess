@@ -94,40 +94,32 @@ pawnDir colour = if colour==White then north else south
 pawnInitialRank colour = if colour==White then 2 else 7
 pawnEnPassantRank colour = if colour==White then 5 else 4
 
-type EndingOrMoves = Either MatchEnding [Move]
-
-moveGenerator :: Position -> EndingOrMoves
+moveGenerator :: Position -> [Move]
 moveGenerator position@(Position moves board colour_to_move) =
-	case sort $ map swap $ catMaybes $ elems board of
-		[ (Þ,_),(Þ,_) ] -> Left Remis
-		[ (fig,_),(Þ,_),(Þ,_) ] | fig `elem` [Ú,Û] -> Left Remis
-		[ (fig1,col1),(fig2,col2),(Þ,_),(Þ,_) ] | col1 /= col2 &&
-			fig1 `elem` [Ú,Û] && fig2 `elem` [Ú,Û] -> Left Remis
-
-		_ -> case filter (king_no_check position) $ [ Move from to mb_take mb_promotion |
-				(piecetype,(from,(to,mb_take))) <- move_targets position,
-				mb_promotion <- case (piecetype,to) of
-					(Ù,(_,r)) | r == 10 - pawnInitialRank colour_to_move -> map Just [Ú,Û,Ü,Ý]
-					_ -> [Nothing] ] ++
-				( case map ((board!).(,castle_rank)) [5..8] of
-					[ Just (kingcol,Þ),Nothing,Nothing,Just (rookcol,Ü) ] |
-						kingcol==colour_to_move && rookcol==colour_to_move &&
-						all (no_check position) (map (,castle_rank) [5..6]) &&
-						all (\ (Move f _ _ _) -> f /= (5,castle_rank) && f /= (8,castle_rank)) moves ->
-							[ Move (5,castle_rank) (7,castle_rank) Nothing Nothing ]
-					_ -> [] ) ++
-				( case map ((board!).(,castle_rank)) [1..5] of
-					[ Just (rookcol,Ü),Nothing,Nothing,Nothing,Just (kingcol,Þ) ] |
-						kingcol==colour_to_move && rookcol==colour_to_move &&
-						all (no_check position) (map (,castle_rank) [4..5]) &&
-						all (\ (Move f _ _ _) -> f /= (1,castle_rank) && f /= (5,castle_rank)) moves ->
-							[ Move (5,castle_rank) (3,castle_rank) Nothing Nothing ]
-					_ -> [] )
-			of
-			[] -> Left $ case no_check position (kings_coors position) of
-				True  -> Stalemate colour_to_move
-				False -> Checkmate colour_to_move
-			moves -> Right moves
+	case filter (king_no_check position) $ [ Move from to mb_take mb_promotion |
+		(piecetype,(from,(to,mb_take))) <- move_targets position,
+		mb_promotion <- case (piecetype,to) of
+			(Ù,(_,r)) | r == 10 - pawnInitialRank colour_to_move -> map Just [Ú,Û,Ü,Ý]
+			_ -> [Nothing] ] ++
+		( case map ((board!).(,castle_rank)) [5..8] of
+			[ Just (kingcol,Þ),Nothing,Nothing,Just (rookcol,Ü) ] |
+				kingcol==colour_to_move && rookcol==colour_to_move &&
+				all (no_check position) (map (,castle_rank) [5..6]) &&
+				all (\ (Move f _ _ _) -> f /= (5,castle_rank) && f /= (8,castle_rank)) moves ->
+					[ Move (5,castle_rank) (7,castle_rank) Nothing Nothing ]
+			_ -> [] ) ++
+		( case map ((board!).(,castle_rank)) [1..5] of
+			[ Just (rookcol,Ü),Nothing,Nothing,Nothing,Just (kingcol,Þ) ] |
+				kingcol==colour_to_move && rookcol==colour_to_move &&
+				all (no_check position) (map (,castle_rank) [4..5]) &&
+				all (\ (Move f _ _ _) -> f /= (1,castle_rank) && f /= (5,castle_rank)) moves ->
+					[ Move (5,castle_rank) (3,castle_rank) Nothing Nothing ]
+			_ -> [] )
+	of
+	[] -> Left $ case no_check position (kings_coors position) of
+		True  -> Stalemate colour_to_move
+		False -> Checkmate colour_to_move
+	moves -> Right moves
 
 	where
 
@@ -179,7 +171,12 @@ type Rating = Float
 mAX_RATING = 1000000.0 :: Rating
 
 evalPosition :: Position -> Rating
-evalPosition pos@Position{..} = case moveGenerator pos of
+evalPosition pos@Position{..} = case sort $ map swap $ catMaybes $ elems positionBoard of
+	[ (Þ,_),(Þ,_) ] -> Left Remis
+	[ (f,_),(Þ,_),(Þ,_) ] | fig `elem` [Ú,Û] -> Left Remis
+	[ (f,col1),(g,col2),(Þ,_),(Þ,_) ] | col1 /= col2 &&
+		f `elem` [Ú,Û] && g `elem` [Ú,Û] -> Left Remis
+	_ -> case moveGenerator pos of
 	Left ending -> case ending of
 		Checkmate colour -> (if colour==White then negate else id) mAX_RATING
 		_                -> 0.0
@@ -326,7 +323,7 @@ data SearchState = SearchState {
 	βCutoffs            :: Int,
 	computationProgress :: [(Int,Int)] }
 	deriving (Show)
-initialSearchState = SearchState False 0 0 0 0 0 [] 0.0 0 0 []
+initialSearchState = SearchState True 0 0 0 0 0 [] 0.0 0 0 []
 
 showSearchState s = printf "Tot. %i Nodes, %i Leaves, %i Evals, bestLineUpdates=%i, α/β-Cutoffs=%i/%i"
 	(nodesProcessed s) (leavesProcessed s) (evaluationsDone s) (bestLineUpdates s) (αCutoffs s) (βCutoffs s)
@@ -423,8 +420,10 @@ do_search maxdepth depth position current_line (α,β) =
 			debug_here depth' (printf "AFTER COMPARISON: BEST was %+.2f, THIS is %+.2f" best_val this_val) current_line' (α,β)
 
 			let (α',β') = case positionColourToMove position of
-				White -> (accum_fun best_val α,β)
-				Black -> (α,accum_fun best_val β)
+				White -> ( accum_fun best_val α, β                    )
+				Black -> ( α                   , accum_fun best_val β )
+
+			liftIO $ putStrConsoleLn $ show (α',β')
 
 			modify' $ \ s -> s { computationProgress = let ((i,n):ps) = computationProgress s in (i+1,n):ps }
 
