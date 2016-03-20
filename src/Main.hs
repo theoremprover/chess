@@ -15,6 +15,9 @@ import Data.Ord
 import System.Time
 import Debug.Trace
 
+import qualified Data.Text    as T
+import qualified Data.Text.IO as T
+
 type File = Int
 type Rank = Int
 type Coors = (File,Rank)
