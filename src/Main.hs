@@ -229,13 +229,15 @@ toFEN :: Position -> String
 toFEN (Position board colour castlequeen castleking mb_ep halfmove_clock movecounter) =
 	intercalate "/" [ row2fen 0 [ board!(f,r) | f <- [1..8] ] | r <- [8,7..1] ] ++ " " ++
 	(if colour==White then "w" else "b") ++ " " ++
-	(if castleking  White then "K" else "") ++
-	(if castlequeen White then "Q" else "") ++
-	(if castleking  Black then "k" else "") ++
-	(if castlequeen Black then "q" else "") ++ " " ++
+	(if castles=="" then "-" else castles) ++ " " ++
 	maybe "-" showCoors mb_ep ++ " " ++
 	show halfmove_clock ++ " " ++ show movecounter
 	where
+	castles =
+		(if castleking  White then "K" else "") ++
+		(if castlequeen White then "Q" else "") ++
+		(if castleking  Black then "k" else "") ++
+		(if castlequeen Black then "q" else "")
 	row2fen :: Int -> [Maybe (Colour,PieceType)] -> String
 	row2fen 0 [] = ""
 	row2fen cnt [] = show cnt
