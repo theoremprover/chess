@@ -15,8 +15,8 @@ import Data.Ord
 import System.Time
 import Debug.Trace
 
-import qualified Data.Text    as T
-import qualified Data.Text.IO as T
+import qualified Data.ByteString.Char8 as BSC
+import qualified Data.ByteString.UTF8 as BSU
 
 type File = Int
 type Rank = Int
@@ -38,8 +38,10 @@ type Piece = (Colour,PieceType)
 
 type Board = Array Coors (Maybe Piece)
 
-stringToPosition col_to_move s = Position [] (array ((1,1),(8,8)) $
-	zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] (map tofig (concat s))) col_to_move
+stringToPosition :: Colour -> [String] -> Position
+stringToPosition col_to_move s = Position (array ((1,1),(8,8)) $
+	zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] (map tofig (concat s)))
+	col_to_move (const True) (const True) Nothing 0 0
 	where
 	tofig c | c >= 'ç' = tofig (chr $ ord c - ord 'ç' + ord 'Ø')
 	tofig 'Ø' = Nothing
@@ -67,26 +69,43 @@ initialPosition = stringToPosition White [
 	"ëÚêÝíÛéÜ" ]
 
 data Position = Position {
-	positionMoves :: [Move], positionBoard::Board, positionColourToMove::Colour }
+	positionBoard              :: Board,
+	positionColourToMove       :: Colour,
+	positionCanCastleQueenSide :: Colour -> Bool,
+	positionCanCastleKingSide  :: Colour -> Bool,
+	positionEnPassantSquare    :: Maybe Coors,
+	positionHalfmoveClock      :: Int,
+	positionMoveCounter        :: Int }
 
 data Move = Move {
 	moveFrom :: Coors, moveTo :: Coors, moveTakes :: Maybe Coors, movePromote :: Maybe PieceType }
 	deriving (Eq,Show)
 
 doMove :: Position -> Move -> Position
-doMove (Position moves board colour) move@(Move from to mb_take mb_promotion) =
-	Position (moves++[move]) (board // (
+doMove (Position board colour castlequeen castleking mb_ep halfmoves movecounter) move@(Move from to mb_take mb_promotion) =
+	Position (board // (
 		maybe [] ((:[]).(,Nothing)) mb_take ++
 		(from,Nothing) :
 		(to,case mb_promotion of
 			Nothing       -> board!from
-			Just promoted -> Just (my_colour,promoted) where
-				Just (my_colour,_) = board!from ) :
-		case (from,to,board!from) of
-			((5,r),(7,_),(Just (colour,Þ))) -> [ ((8,r),Nothing),((6,r),Just (colour,Ü)) ]
-			((5,r),(3,_),(Just (colour,Þ))) -> [ ((1,r),Nothing),((4,r),Just (colour,Ü)) ]
-			_ -> [] ))
+			Just promoted -> Just (my_colour,promoted)) :
+		add_dels ))
 		(nextColour colour)
+		(makecastlef castlequeen $ castlequeen my_colour && not castled_queen && from `notElem` [(5,castle_rank),(1,castle_rank)])
+		(makecastlef castleking  $ castleking  my_colour && not castled_king  && from `notElem` [(5,castle_rank),(8,castle_rank)])
+		( case (moved_piecetype,from,to) of
+			(Ù,(r,f0),(_,f1)) | abs (f1-f0) == 2 -> Just (r,(div (f0+f1) 2))
+			_ -> Nothing )
+		(if isJust mb_take || moved_piecetype==Ù then 0 else halfmoves+1)
+		(if colour==Black then movecounter+1 else movecounter)
+	where
+	castle_rank = castleRank my_colour
+	makecastlef f' val col = if col==colour then val else f' col
+	Just (my_colour,moved_piecetype) = board!from
+	(castled_queen,castled_king,add_dels) = case (from,to,board!from) of
+		((5,r),(7,_),(Just (col,Þ))) | col==my_colour -> (False,True,[ ((8,r),Nothing),((6,r),Just (col,Ü)) ])
+		((5,r),(3,_),(Just (col,Þ))) | col==my_colour -> (True,False,[ ((1,r),Nothing),((4,r),Just (col,Ü)) ])
+		_ -> (False,False,[])
 
 data MatchEnding = Checkmate Colour | Stalemate Colour | Remis | MoveRepetition
 	deriving (Eq,Show)
@@ -97,43 +116,48 @@ diagonal = [ north+east,north+west,south+east,south+west ]
 pawnDir colour = if colour==White then north else south
 pawnInitialRank colour = if colour==White then 2 else 7
 pawnEnPassantRank colour = if colour==White then 5 else 4
+castleRank colour = if colour==White then 1 else 8
 
 moveGenerator :: Position -> Either MatchEnding [Move]
-moveGenerator position@(Position moves board colour_to_move) =
+moveGenerator position@(Position board colour_to_move cancastlequeen cancastleking mb_epsquare halfmoves _) =
 	case sort $ map swap $ catMaybes $ elems board of
 		[ (Þ,_),(Þ,_) ] -> Left Remis
 		[ (f,_),(Þ,_),(Þ,_) ] | f `elem` [Ú,Û] -> Left Remis
 		[ (f,col1),(g,col2),(Þ,_),(Þ,_) ] | col1 /= col2 &&
 			f `elem` [Ú,Û] && g `elem` [Ú,Û] -> Left Remis
+		_ | halfmoves >= 50 -> Left Remis
 		_ -> case filter (king_no_check position) $ [ Move from to mb_take mb_promotion |
 			(piecetype,(from,(to,mb_take))) <- move_targets position,
 			mb_promotion <- case (piecetype,to) of
 				(Ù,(_,r)) | r == 10 - pawnInitialRank colour_to_move -> map Just [Ú,Û,Ü,Ý]
 				_ -> [Nothing] ] ++
-			( case map ((board!).(,castle_rank)) [5..8] of
-				[ Just (kingcol,Þ),Nothing,Nothing,Just (rookcol,Ü) ] |
-					kingcol==colour_to_move && rookcol==colour_to_move &&
-					all (no_check position) [(5,castle_rank),(6,castle_rank)] &&
-					all (\ (Move f _ _ _) -> f /= (5,castle_rank) && f /= (8,castle_rank)) moves ->
-						[ Move (5,castle_rank) (7,castle_rank) Nothing Nothing ]
-				_ -> [] ) ++
-			( case map ((board!).(,castle_rank)) [1..5] of
-				[ Just (rookcol,Ü),Nothing,Nothing,Nothing,Just (kingcol,Þ) ] |
-					kingcol==colour_to_move && rookcol==colour_to_move &&
-					all (no_check position) [(4,castle_rank),(5,castle_rank)] &&
-					all (\ (Move f _ _ _) -> f /= (1,castle_rank) && f /= (5,castle_rank)) moves ->
-						[ Move (5,castle_rank) (3,castle_rank) Nothing Nothing ]
-				_ -> [] )
+			if cancastleking colour_to_move then
+				case map ((board!).(,castle_rank)) [5..8] of
+					[ Just (kingcol,Þ),Nothing,Nothing,Just (rookcol,Ü) ] |
+						kingcol==colour_to_move && rookcol==colour_to_move &&
+						all (no_check position) [(5,castle_rank),(6,castle_rank)] ->
+							[ Move (5,castle_rank) (7,castle_rank) Nothing Nothing ]
+					_ -> []
+				else []
+			++
+			if cancastlequeen colour_to_move then
+				case map ((board!).(,castle_rank)) [1..5] of
+					[ Just (rookcol,Ü),Nothing,Nothing,Nothing,Just (kingcol,Þ) ] |
+						kingcol==colour_to_move && rookcol==colour_to_move &&
+						all (no_check position) [(4,castle_rank),(5,castle_rank)] ->
+							[ Move (5,castle_rank) (3,castle_rank) Nothing Nothing ]
+					_ -> []
+				else []
 			of
 			[] -> Left $ (if no_check position (kings_coors position) then Stalemate else Checkmate) colour_to_move
 			moves -> Right moves
 
 	where
 
-	castle_rank = if colour_to_move==White then 1 else 8
+	castle_rank = castleRank colour_to_move
 
 move_targets :: Position -> [(PieceType,(Coors,(Coors,Maybe Coors)))]
-move_targets position@(Position moves board colour_to_move) = [ (piecetype,(from,target)) |
+move_targets position@(Position board colour_to_move _ _ mb_ep _ _) = [ (piecetype,(from,target)) |
 	(from,Just (colour,piecetype)) <- assocs board,
 	colour==colour_to_move,
 	target <- case (piecetype,from) of
@@ -144,10 +168,9 @@ move_targets position@(Position moves board colour_to_move) = [ (piecetype,(from
 				Just abs_to <- [ addrelcoors from (pawn_dir+eastwest) ],
 				Nothing <- [ board!abs_to ],
 				Just take <- [ addrelcoors from eastwest ],
+				Just take == mb_ep,
 				Just (col,Ù) <- [ board!take ],
 				Just pawn_from <- [ addrelcoors from (pawn_dir*2+eastwest) ],
-				(Move last_from last_to Nothing Nothing):_ <- [ reverse moves ],
-				last_from==pawn_from, last_to==take,
 				col == nextColour colour_to_move ]
 		_ -> concatMap (dir_targets from) $ case piecetype of
 			Ú -> map (,1) [
@@ -199,9 +222,29 @@ evalPosition pos@Position{..} = case moveGenerator pos of
 
 putStrConsoleLn s = do
 	putStrLn s
+--	BSC.putStrLn $ BSU.fromString s
 --	appendFile "test.txt" (s++"\n")
 
-showPos (Position moves board colour) = do
+toFEN :: Position -> String
+toFEN (Position board colour castlequeen castleking mb_ep halfmove_clock movecounter) =
+	intercalate "/" [ row2fen 0 [ board!(f,r) | f <- [1..8] ] | r <- [8,7..1] ] ++ " " ++
+	(if colour==White then "w" else "b") ++ " " ++
+	(if castleking  White then "K" else "") ++
+	(if castlequeen White then "Q" else "") ++
+	(if castleking  Black then "k" else "") ++
+	(if castlequeen Black then "q" else "") ++ " " ++
+	maybe "-" showCoors mb_ep ++ " " ++
+	show halfmove_clock ++ " " ++ show movecounter
+	where
+	row2fen :: Int -> [Maybe (Colour,PieceType)] -> String
+	row2fen 0 [] = ""
+	row2fen cnt [] = show cnt
+	row2fen cnt (Nothing:rs) = row2fen (cnt+1) rs
+	row2fen cnt ((Just (col,piecetype)) : rs) = (if cnt>0 then show cnt else "") ++
+		map (if col==White then toUpper else toLower) (if piecetype==Ù then "p" else pieceStr piecetype) ++
+		row2fen 0 rs
+
+showPos pos@(Position board colour _ _ _ _ _) = do
 	putStrConsoleLn $ "¿" ++ replicate 8 'À' ++ "Á"
 	forM_ [8,7..1] $ \ rank -> do
 		line <- forM [1..8] $ \ file -> do
@@ -210,9 +253,10 @@ showPos (Position moves board colour) = do
 				Just (colour,piece) -> 1 + fromEnum colour * 6 + fromEnum piece
 		putStrConsoleLn $ [toEnum $ 0xc6 + rank ] ++ line ++ "Ã"
 	putStrConsoleLn $ "Ä" ++ map (toEnum.(+0xce)) [1..8] ++ "Æ"
+	putStrConsoleLn $ "FEN: " ++ toFEN pos
 	putStrConsoleLn $ show colour ++ " to move"
 
-showFile f = take 1 $ drop f " abcdefgh"
+showFile f = [ "abcdefgh" !! (f-1) ]
 showCoors (f,r) = showFile f ++ show r 
 
 -- is the square coors not threatened by next player
@@ -260,6 +304,7 @@ showMoves pos moves = showline moves where
 
 main = do
 --	writeFile "test.txt" ""
+	putStrConsoleLn "Cutoffs  ëÚêÝíÛéÜ"
 	loop 4 testPosition
 
 loop depth pos = do
@@ -325,9 +370,9 @@ data SearchState = SearchState {
 	βCutoffs            :: Int,
 	computationProgress :: [(Int,Int)] }
 	deriving (Show)
-initialSearchState = SearchState True 0 0 0 0 0 [] 0.0 0 0 []
+initialSearchState = SearchState False 0 0 0 0 0 [] 0.0 0 0 []
 
-showSearchState s = printf "Tot. %i Nodes, %i Leaves, %i Evals, bestLineUpdates=%i, α/β-Cutoffs=%i/%i"
+showSearchState s = printf "Tot. %i Nodes, %i Leaves, %i Evals, bestLineUpdates=%i, alpha/beta-Cutoffs=%i/%i"
 	(nodesProcessed s) (leavesProcessed s) (evaluationsDone s) (bestLineUpdates s) (αCutoffs s) (βCutoffs s)
 
 comp_progress _ [] = 0.0 :: Float
@@ -349,8 +394,8 @@ debug_here depth str current_line αβ = do
 			putStrConsoleLn $ "Best Line: " ++ showLine (bestLine s)
 			putStrConsoleLn $ "Computation Progress: " ++ show (computationProgress s)
 			putStrConsoleLn $ "Current Line: " ++ showLine current_line
-			putStrConsoleLn $ "(α,β) = " ++ show αβ
-			putStrConsoleLn $ printf "αCutoffs = %i, βCutoffs = %i" (αCutoffs s) (βCutoffs s)
+			putStrConsoleLn $ "(alpha,beta) = " ++ show αβ
+			putStrConsoleLn $ printf "alphaCutoffs = %i, betaCutoffs = %i" (αCutoffs s) (βCutoffs s)
 			putStrConsoleLn $ "============================"
 			putStrConsoleLn "Press Enter or 'd0'"
 			getLine
@@ -425,8 +470,6 @@ do_search maxdepth depth position current_line (α,β) =
 				White -> ( accum_fun best_val α, β                    )
 				Black -> ( α                   , accum_fun best_val β )
 
-			liftIO $ putStrConsoleLn $ show (α',β')
-
 			modify' $ \ s -> s { computationProgress = let ((i,n):ps) = computationProgress s in (i+1,n):ps }
 
 			let killer_moves_acc' = map nub $ zipWith (++) sub_killer_moves killer_moves_acc
@@ -436,13 +479,13 @@ do_search maxdepth depth position current_line (α,β) =
 					[] -> do
 						debug_here depth ("find_best_line [] returned " ++ show best) current_line (α,β)
 						return (best,[]:killer_moves_acc')
-					_  -> find_best_line best' moves (α,β) killer_moves_acc'
+					_  -> find_best_line best' moves (α',β') killer_moves_acc'
 				True -> do
 					case positionColourToMove position of
 						White -> do
-							debug_here depth' "β CUTOFF: " current_line' (α,β)
+							debug_here depth' "beta CUTOFF: " current_line' (α,β)
 							modify' $ \ s -> s { βCutoffs = βCutoffs s + 1 }
 						Black -> do
-							debug_here depth' "α CUTOFF: " current_line' (α,β)
+							debug_here depth' "alpha CUTOFF: " current_line' (α,β)
 							modify' $ \ s -> s { αCutoffs = αCutoffs s + 1 }
 					return (best,[move]:killer_moves_acc')
