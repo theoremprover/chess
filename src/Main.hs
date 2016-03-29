@@ -227,6 +227,8 @@ putStrConsole s = do
 
 putStrConsoleLn s = putStrConsole $ s ++ "\n"
 
+fENFigureChars = [(Ù,"P"),(Ú,"N"),(Û,"B"),(Ü,"R"),(Ý,"Q"),(Þ,"K")]
+
 toFEN :: Position -> String
 toFEN (Position board colour castlequeen castleking mb_ep halfmove_clock movecounter) =
 	intercalate "/" [ row2fen 0 [ board!(f,r) | f <- [1..8] ] | r <- [8,7..1] ] ++ " " ++
@@ -245,8 +247,16 @@ toFEN (Position board colour castlequeen castleking mb_ep halfmove_clock movecou
 	row2fen cnt [] = show cnt
 	row2fen cnt (Nothing:rs) = row2fen (cnt+1) rs
 	row2fen cnt ((Just (col,piecetype)) : rs) = (if cnt>0 then show cnt else "") ++
-		map (if col==White then toUpper else toLower) (if piecetype==Ù then "p" else pieceStr piecetype) ++
+		map (if col==White then toUpper else toLower) (fromJust $ lookup piecetype fENFigureChars) ++
 		row2fen 0 rs
+
+fromFEN :: String -> [Position]
+fromFEN s = [ (Position (array ((1,1),(8,8)) rows) colour castlequeen castleking mb_ep halfmoveclock nummoves , s') |
+	rows <- [ tosquare 
+	where
+	parsesquare ('/':cs) = parsesquare cs
+	parsesquare (c:cs) | isDigit c = replicate (read [c]) Nothing ++ parsesquare cs
+	parsesquare (c:cs) | isUpper c = (Just 
 
 showPos pos@(Position board colour _ _ _ _ _) = do
 	putStrConsoleLn $ "¿" ++ replicate 8 'À' ++ "Á"
