@@ -14,6 +14,7 @@ import Data.Char
 import Data.Ord
 import System.Time
 import qualified Data.IntMap.Strict as IntMap
+import Text.Parsec
 
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.UTF8 as BSU
@@ -250,13 +251,24 @@ toFEN (Position board colour castlequeen castleking mb_ep halfmove_clock movecou
 		map (if col==White then toUpper else toLower) (fromJust $ lookup piecetype fENFigureChars) ++
 		row2fen 0 rs
 
+fenC = do
+	rows <- sequence (replicate 8 fenRowC)
+	string " "
+	colour <- (string "w" >> return White) <|> (string "b" >> return Black)
+	
+
 fromFEN :: String -> [Position]
-fromFEN s = [ (Position (array ((1,1),(8,8)) rows) colour castlequeen castleking mb_ep halfmoveclock nummoves , s') |
-	rows <- [ tosquare 
+fromFEN s = [ ( Position (array ((1,1),(8,8)) sqassocs) colour castlequeen castleking mb_ep halfmoveclock nummoves , s') |
+	let  ,(colour,_) <- [(White,"w"),(Black,"b")]
+	]
 	where
-	parsesquare ('/':cs) = parsesquare cs
-	parsesquare (c:cs) | isDigit c = replicate (read [c]) Nothing ++ parsesquare cs
-	parsesquare (c:cs) | isUpper c = (Just 
+	(sqs,s1) = parsesquares s []
+	sqassocs = zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] sqs
+	parsesquares (' ':cs) acc = (acc,cs)
+	parsesquares ('/':cs) acc = parsesquares cs acc
+	parsesquares (c:cs) acc | isDigit c = parsesquares cs (acc ++ replicate (read [c]) Nothing)
+	parsesquares (c:cs) acc = parsesquares cs $ acc ++ head
+		[ Just (if isLower c then Black else White,fig) | (fig,cu) <- fENFigureChars, cu == toUpper c ]
 
 showPos pos@(Position board colour _ _ _ _ _) = do
 	putStrConsoleLn $ "¿" ++ replicate 8 'À' ++ "Á"
