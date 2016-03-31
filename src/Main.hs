@@ -15,6 +15,7 @@ import Data.Ord
 import System.Time
 import qualified Data.IntMap.Strict as IntMap
 import Text.Parsec
+--import Text.Parsec.Combinator
 
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.UTF8 as BSU
@@ -77,6 +78,8 @@ data Position = Position {
 	positionEnPassantSquare    :: Maybe Coors,
 	positionHalfmoveClock      :: Int,
 	positionMoveCounter        :: Int }
+instance Show Position where
+	show Position{..} = show positionBoard
 
 data Move = Move {
 	moveFrom :: Coors, moveTo :: Coors, moveTakes :: Maybe Coors, movePromote :: Maybe PieceType }
@@ -251,24 +254,37 @@ toFEN (Position board colour castlequeen castleking mb_ep halfmove_clock movecou
 		map (if col==White then toUpper else toLower) (fromJust $ lookup piecetype fENFigureChars) ++
 		row2fen 0 rs
 
-fenC = do
-	rows <- sequence (replicate 8 fenRowC)
-	string " "
-	colour <- (string "w" >> return White) <|> (string "b" >> return Black)
-	
-
-fromFEN :: String -> [Position]
-fromFEN s = [ ( Position (array ((1,1),(8,8)) sqassocs) colour castlequeen castleking mb_ep halfmoveclock nummoves , s') |
-	let  ,(colour,_) <- [(White,"w"),(Black,"b")]
-	]
+fen2position :: String -> Either ParseError Position
+fen2position = parse fen_p ""
 	where
-	(sqs,s1) = parsesquares s []
-	sqassocs = zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] sqs
-	parsesquares (' ':cs) acc = (acc,cs)
-	parsesquares ('/':cs) acc = parsesquares cs acc
-	parsesquares (c:cs) acc | isDigit c = parsesquares cs (acc ++ replicate (read [c]) Nothing)
-	parsesquares (c:cs) acc = parsesquares cs $ acc ++ head
-		[ Just (if isLower c then Black else White,fig) | (fig,cu) <- fENFigureChars, cu == toUpper c ]
+	fen_p = do
+		rows <- count 8 $ manyTill (digit_p <|> piece_p) (string " " <|> string "/")
+		colour <- (string "w" >> return White) <|> (string "b" >> return Black)
+		castleK <- option False $ string "K" >> return True
+		castleQ <- option False $ string "Q" >> return True
+		castlek <- option False $ string "k" >> return True
+		castleq <- option False $ string "q" >> return True
+		when (not $ castleK || castleQ || castlek || castleq) $ string "-"
+		string " "
+		mb_ep <- (string "-" >> return Nothing) <|> (ep_square_p >>= return . Just)
+		return $ Position
+			(array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] (concat $ concat rows))
+			colour
+			(\ c -> if c==White then castleQ else castleq)
+			(\ c -> if c==White then castleK else castlek)
+			(const False)
+			mb_ep halfmoveclock movecnt
+	digit_p = do
+		d <- digit
+		return $ replicate (read [d]) Nothing
+	piece_p = do
+		c <- satisfy (`elem` "KQRBNPkqrbnp")
+		return [ Just (if isUpper c then White else Black,
+			head [ p | (p,[pc]) <- fENFigureChars, pc == toUpper c ]) ]
+	ep_square_p = do
+		fc <- satisfy (`elem` ['a'..'h'])
+		rc <- string "3" <|> string "7"
+		return (ord fc - ord 'a' + 1,read rc)
 
 showPos pos@(Position board colour _ _ _ _ _) = do
 	putStrConsoleLn $ "¿" ++ replicate 8 'À' ++ "Á"
