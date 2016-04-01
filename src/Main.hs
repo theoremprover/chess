@@ -253,9 +253,33 @@ toFEN (Position board colour castlequeen castleking mb_ep halfmove_clock movecou
 		map (if col==White then toUpper else toLower) (fromJust $ lookup piecetype fENFigureChars) ++
 		row2fen 0 rs
 
+epd_p = do
+	pos <- fenpos_p
+	string " bm "
+	line <- sepBy1 (move_p pos) (string " ")
+	string "; id \""
+	idstr <- manyTill anyChar (try $ string "\"")
+	string ";"
+	return (idstr,pos,line)
+	where
+	movestr_p (str,move) = string str >> return move
+	move_p pos = choice $ map movestr_p $ zip (map (showMove pos) moves) moves
+		where
+		Right moves = moveGenerator pos 
+
+t = do
+	f <- readFile "BK-Test.txt"
+	let ls = lines f
+	print $ parse epd_p "" (ls!!1) 
+
+fromFEN :: String -> Either ParseError Position
+fromFEN = parse fen_p ""
+
+fenpos_p :: Parsec String u Position
 fenpos_p = do
 	rows <- count 8 $ manyTill (digit_p <|> piece_p) (string " " <|> string "/")
 	colour <- (string "w" >> return White) <|> (string "b" >> return Black)
+	string " "
 	castleK <- option False $ string "K" >> return True
 	castleQ <- option False $ string "Q" >> return True
 	castlek <- option False $ string "k" >> return True
@@ -274,7 +298,7 @@ fenpos_p = do
 		d <- digit
 		return $ replicate (read [d]) Nothing
 	piece_p = do
-		c <- satisfy (`elem` "KQRBNPkqrbnp")
+		c <- oneOf "KQRBNPkqrbnp"
 		return [ Just (if isUpper c then White else Black,
 			head [ p | (p,[pc]) <- fENFigureChars, pc == toUpper c ]) ]
 	ep_square_p = do
