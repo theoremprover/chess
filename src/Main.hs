@@ -1,9 +1,10 @@
-{-# LANGUAGE TupleSections,ScopedTypeVariables,RecordWildCards,FlexibleContexts,UnicodeSyntax,DeriveGeneric #-}
+{-# LANGUAGE TupleSections,TypeSynonymInstances,FlexibleInstances,ScopedTypeVariables,RecordWildCards,FlexibleContexts,UnicodeSyntax,DeriveGeneric #-}
 
 module Main where
 
 import GHC.Generics (Generic)
 import Data.Hashable
+import qualified Data.HashMap.Strict as HashMap (insert,HashMap,empty,lookup,size) 
 
 import Data.Array
 import Data.Maybe
@@ -29,23 +30,27 @@ type Coors = (File,Rank)
 type Depth = Int
 
 data Colour = White | Black
-	deriving (Eq,Show,Enum,Ord)
+	deriving (Eq,Show,Enum,Ord,Generic)
+instance Hashable Colour
 
 nextColour White = Black
 nextColour Black = White
 coloursToMove = iterate nextColour White
 
 data PieceType = Ù | Ú | Û | Ü | Ý | Þ
-	deriving (Show,Eq,Enum,Ord,Ix)
+	deriving (Show,Eq,Enum,Ord,Ix,Generic)
+instance Hashable PieceType
 
 type Piece = (Colour,PieceType)
 
 type Board = Array Coors (Maybe Piece)
+instance Hashable Board where
+	hashWithSalt salt board = hashWithSalt salt (assocs board)
 
 stringToPosition :: Colour -> [String] -> Position
 stringToPosition col_to_move s = Position (array ((1,1),(8,8)) $
 	zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] (map tofig (concat s)))
-	col_to_move (const True) (const True) Nothing 0 0
+	col_to_move [White,Black] [White,Black] Nothing 0 0
 	where
 	tofig c | c >= 'ç' = tofig (chr $ ord c - ord 'ç' + ord 'Ø')
 	tofig 'Ø' = Nothing
@@ -72,14 +77,19 @@ initialPosition = stringToPosition White [
 	"ÙèÙèÙèÙè",
 	"ëÚêÝíÛéÜ" ]
 
+type CastlingRights = [Colour]
+
 data Position = Position {
 	positionBoard              :: Board,
 	positionColourToMove       :: Colour,
-	positionCanCastleQueenSide :: Colour -> Bool,
-	positionCanCastleKingSide  :: Colour -> Bool,
+	positionCanCastleQueenSide :: CastlingRights,
+	positionCanCastleKingSide  :: CastlingRights,
 	positionEnPassantSquare    :: Maybe Coors,
 	positionHalfmoveClock      :: Int,
 	positionMoveCounter        :: Int }
+	deriving (Generic,Eq)
+instance Hashable Position
+
 instance Show Position where
 	show Position{..} = show positionBoard
 
@@ -97,8 +107,8 @@ doMove (Position board colour castlequeen castleking mb_ep halfmoves movecounter
 			Just promoted -> Just (my_colour,promoted)) :
 		add_dels ))
 		(nextColour colour)
-		(makecastlef castlequeen $ castlequeen my_colour && not castled_queen && from `notElem` [(5,castle_rank),(1,castle_rank)])
-		(makecastlef castleking  $ castleking  my_colour && not castled_king  && from `notElem` [(5,castle_rank),(8,castle_rank)])
+		(if castled_queen || castled_king || from `elem` [(5,castle_rank),(1,castle_rank)] then delete my_colour castlequeen else castlequeen)
+		(if castled_queen || castled_king || from `elem` [(5,castle_rank),(8,castle_rank)] then delete my_colour castleking else castleking)
 		( case (moved_piecetype,from,to) of
 			(Ù,(r,f0),(_,f1)) | abs (f1-f0) == 2 -> Just (r,(div (f0+f1) 2))
 			_ -> Nothing )
@@ -106,7 +116,6 @@ doMove (Position board colour castlequeen castleking mb_ep halfmoves movecounter
 		(if colour==Black then movecounter+1 else movecounter)
 	where
 	castle_rank = castleRank my_colour
-	makecastlef f' val col = if col==colour then val else f' col
 	Just (my_colour,moved_piecetype) = board!from
 	(castled_queen,castled_king,add_dels) = case (from,to,board!from) of
 		((5,r),(7,_),(Just (col,Þ))) | col==my_colour -> (False,True,[ ((8,r),Nothing),((6,r),Just (col,Ü)) ])
@@ -137,7 +146,7 @@ moveGenerator position@(Position board colour_to_move cancastlequeen cancastleki
 			mb_promotion <- case (piecetype,to) of
 				(Ù,(_,r)) | r == 10 - pawnInitialRank colour_to_move -> map Just [Ú,Û,Ü,Ý]
 				_ -> [Nothing] ] ++
-			if cancastleking colour_to_move then
+			if colour_to_move `elem` cancastleking then
 				case map ((board!).(,castle_rank)) [5..8] of
 					[ Just (kingcol,Þ),Nothing,Nothing,Just (rookcol,Ü) ] |
 						kingcol==colour_to_move && rookcol==colour_to_move &&
@@ -146,7 +155,7 @@ moveGenerator position@(Position board colour_to_move cancastlequeen cancastleki
 					_ -> []
 				else []
 			++
-			if cancastlequeen colour_to_move then
+			if colour_to_move `elem` cancastlequeen then
 				case map ((board!).(,castle_rank)) [1..5] of
 					[ Just (rookcol,Ü),Nothing,Nothing,Nothing,Just (kingcol,Þ) ] |
 						kingcol==colour_to_move && rookcol==colour_to_move &&
@@ -244,10 +253,10 @@ toFEN (Position board colour castlequeen castleking mb_ep halfmove_clock movecou
 	show halfmove_clock ++ " " ++ show movecounter
 	where
 	castles =
-		(if castleking  White then "K" else "") ++
-		(if castlequeen White then "Q" else "") ++
-		(if castleking  Black then "k" else "") ++
-		(if castlequeen Black then "q" else "")
+		(if White `elem` castleking  then "K" else "") ++
+		(if White `elem` castlequeen then "Q" else "") ++
+		(if Black `elem` castleking  then "k" else "") ++
+		(if Black `elem` castlequeen then "q" else "")
 	row2fen :: Int -> [Maybe (Colour,PieceType)] -> String
 	row2fen 0 [] = ""
 	row2fen cnt [] = show cnt
@@ -293,8 +302,8 @@ fenpos_p = do
 	return $ Position
 		(array ((1,1),(8,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [1..8] ] (concat $ concat rows))
 		colour
-		(\ c -> if c==White then castleQ else castleq)
-		(\ c -> if c==White then castleK else castlek)
+		(if castleQ then [White] else [] ++ if castleq then [Black] else [])
+		(if castleK then [White] else [] ++ if castlek then [Black] else [])
 		mb_ep 0 0
 	where
 	digit_p = do
@@ -319,6 +328,7 @@ fen_p = do
 
 int_p = many1 digit >>= (return . (read :: String -> Int))
 
+{-
 toPolyglotHash pos = 
 --fromPolyglotHash hash =
 
@@ -328,7 +338,7 @@ ht = do
 	where
 	Right pos = parse fen_p "" "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPPKPPP/RNBQ1BNR b kq - 0 3"
 	key = 0x652a607ca3f242c1
-
+-}
 
 showPos pos@(Position board colour _ _ _ _ _) = do
 	putStrConsoleLn $ "¿" ++ replicate 8 'À' ++ "Á"
@@ -456,9 +466,11 @@ data SearchState = SearchState {
 	βCutoffs            :: Int,
 	computationProgress :: [(Int,Int)],
 	killerMoveHits      :: Int,
-	memoizationHits     :: Int }
+	memoizationHits     :: Int,
+	memoizationMisses   :: Int,
+	positionHashtable   :: HashMap.HashMap Position (Rating,[Move]) }
 	deriving (Show)
-initialSearchState = SearchState False 0 0 0 0 0 [] 0.0 0 0 [] 0 0
+initialSearchState = SearchState False 0 0 0 0 0 [] 0.0 0 0 [] 0 0 0 HashMap.empty
 
 showSearchState s = printf "Tot. %i Nodes, %i Leaves, %i Evals, bestLineUpdates=%i, alpha/beta-Cutoffs=%i/%i"
 	(nodesProcessed s) (leavesProcessed s) (evaluationsDone s) (bestLineUpdates s) (αCutoffs s) (βCutoffs s)
@@ -501,16 +513,24 @@ do_search maxdepth depth position current_line (α,β) killermoves =
 	case moveGenerator position of
 		Left  _  -> return ((evalPosition position,[]),killermoves)
 		Right unsorted_moves -> do
-			let
-				presorted_moves = reverse $ sortBy (comparing move_sort_val) unsorted_moves
-				kill_moves = (IntMap.findWithDefault [] depth killermoves) `intersect` presorted_moves
-				moves = kill_moves ++ (presorted_moves \\ kill_moves)
-			modify' $ \ s -> s { computationProgress = (0,length moves) : computationProgress s }
-			(res,killer_moves') <- find_best_line (worst_val,[]) moves (α,β) killermoves
-			debug_here depth ("find_best_line returned " ++ show res) current_line (α,β)
-			modify' $ \ s -> s { computationProgress = tail (computationProgress s) }
-			debug_here depth "AFTER FIND_BEST_LINE" current_line (α,β)
-			return (res,killer_moves')
+			hashmap <- gets positionHashtable
+			case HashMap.lookup position hashmap of
+				Just res -> do
+					modify' $ \ s -> s { memoizationHits = memoizationHits s + 1 }
+					return (res,killermoves)
+				Nothing -> do
+					modify' $ \ s -> s { memoizationMisses = memoizationMisses s + 1 }
+					let
+						presorted_moves = reverse $ sortBy (comparing move_sort_val) unsorted_moves
+						kill_moves = (IntMap.findWithDefault [] depth killermoves) `intersect` presorted_moves
+						moves = kill_moves ++ (presorted_moves \\ kill_moves)
+					modify' $ \ s -> s { computationProgress = (0,length moves) : computationProgress s }
+					(res,killer_moves') <- find_best_line (worst_val,[]) moves (α,β) killermoves
+					modify' $ \ s -> s { positionHashtable = HashMap.insert position res (positionHashtable s) }
+					debug_here depth ("find_best_line returned " ++ show res) current_line (α,β)
+					modify' $ \ s -> s { computationProgress = tail (computationProgress s) }
+					debug_here depth "AFTER FIND_BEST_LINE" current_line (α,β)
+					return (res,killer_moves')
 
 		where
 
@@ -544,12 +564,11 @@ do_search maxdepth depth position current_line (α,β) killermoves =
 					TOD current_secs _ <- liftIO $ getClockTime
 					when (current_secs - last_output_secs >=1) $ do
 						s <- get
-						liftIO $ putStrConsoleLn $ printf "[%3.0f%%]  Cutoffs:%i/%i  KillerMoveHits:%i  MemoHits:%i Best line: %+.2f  <-  %s"
+						liftIO $ putStrConsoleLn $ printf "[%3.0f%%]  Cutoffs:%i/%i  KillerMoveHits:%i  MemoPos's:%i MemoHits:%i MemoMisses: %i Best line: %+.2f  <-  %s"
 							(100.0 * comp_progress [] (reverse $ computationProgress s))
 							(αCutoffs s) (βCutoffs s)
-							(killerMoveHits s) (memoizationHits s)
+							(killerMoveHits s) (HashMap.size (positionHashtable s)) (memoizationHits s) (memoizationMisses s)
 							(bestVal s) (showLine (bestLine s))
---						liftIO $ putStrConsoleLn $ show $ map (length.snd) (IntMap.assocs killermoves)
 						modify' $ \ s -> s { lastStateOutputTime = current_secs }
 					return $ ((evalPosition position',[]),IntMap.empty)			
 
