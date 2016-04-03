@@ -1,6 +1,9 @@
-{-# LANGUAGE TupleSections,ScopedTypeVariables,RecordWildCards,FlexibleContexts,UnicodeSyntax #-}
+{-# LANGUAGE TupleSections,ScopedTypeVariables,RecordWildCards,FlexibleContexts,UnicodeSyntax,DeriveGeneric #-}
 
 module Main where
+
+import GHC.Generics (Generic)
+import Data.Hashable
 
 import Data.Array
 import Data.Maybe
