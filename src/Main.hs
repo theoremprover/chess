@@ -316,6 +316,17 @@ fen_p = do
 
 int_p = many1 digit >>= (return . (read :: String -> Int))
 
+toPolyglotHash pos = 
+--fromPolyglotHash hash =
+
+ht = do
+	putStrLn "key == toPolyglotHash pos: " ++ show (key == toPolyglotHash pos)
+--	putStrLn "fromPolyglotHash key == pos" ++ show (fromPolyglotHash key == pos)
+	where
+	Right pos = parse fen_p "" "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPPKPPP/RNBQ1BNR b kq - 0 3"
+	key = 0x652a607ca3f242c1
+
+
 showPos pos@(Position board colour _ _ _ _ _) = do
 	putStrConsoleLn $ "¿" ++ replicate 8 'À' ++ "Á"
 	forM_ [8,7..1] $ \ rank -> do
