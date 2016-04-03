@@ -441,9 +441,10 @@ data SearchState = SearchState {
 	αCutoffs            :: Int,
 	βCutoffs            :: Int,
 	computationProgress :: [(Int,Int)],
-	killerMoveHits      :: Int }
+	killerMoveHits      :: Int,
+	memoizationHits     :: Int }
 	deriving (Show)
-initialSearchState = SearchState False 0 0 0 0 0 [] 0.0 0 0 [] 0
+initialSearchState = SearchState False 0 0 0 0 0 [] 0.0 0 0 [] 0 0
 
 showSearchState s = printf "Tot. %i Nodes, %i Leaves, %i Evals, bestLineUpdates=%i, alpha/beta-Cutoffs=%i/%i"
 	(nodesProcessed s) (leavesProcessed s) (evaluationsDone s) (bestLineUpdates s) (αCutoffs s) (βCutoffs s)
@@ -529,10 +530,10 @@ do_search maxdepth depth position current_line (α,β) killermoves =
 					TOD current_secs _ <- liftIO $ getClockTime
 					when (current_secs - last_output_secs >=1) $ do
 						s <- get
-						liftIO $ putStrConsoleLn $ printf "[%3.0f%%]  Cutoffs:%i/%i  KillerMoveHits:%i  Best line: %+.2f  <-  %s"
+						liftIO $ putStrConsoleLn $ printf "[%3.0f%%]  Cutoffs:%i/%i  KillerMoveHits:%i  MemoHits:%i Best line: %+.2f  <-  %s"
 							(100.0 * comp_progress [] (reverse $ computationProgress s))
 							(αCutoffs s) (βCutoffs s)
-							(killerMoveHits s)
+							(killerMoveHits s) (memoizationHits s)
 							(bestVal s) (showLine (bestLine s))
 --						liftIO $ putStrConsoleLn $ show $ map (length.snd) (IntMap.assocs killermoves)
 						modify' $ \ s -> s { lastStateOutputTime = current_secs }
