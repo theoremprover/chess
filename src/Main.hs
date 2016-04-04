@@ -360,7 +360,7 @@ no_check pos coors = all (\ (_,(_,(to,_))) -> coors /= to) $
 	move_targets (pos { positionColourToMove = nextColour (positionColourToMove pos) })
 
 -- the position of the king of the player to move in this position
-kings_coors Position{..} = head [ coors | (coors,Just (col,Þ)) <- assocs positionBoard, col==positionColourToMove ]
+kings_coors Position{..} = head $ [ coors | (coors,Just (col,Þ)) <- assocs positionBoard, col==positionColourToMove ]
 
 -- would the king of the player to move in pos be in check after the move
 king_no_check pos move = no_check pos' (kings_coors pos') where
@@ -401,7 +401,7 @@ showMoves pos moves = showline moves where
 main = do
 --	writeFile "test.txt" ""
 	putStrConsoleLn "Cutoffs  ëÚêÝíÛéÜ"
-	loop 4 testPosition
+	loop 8 testPosition
 
 loop depth pos = do
 	putStrConsoleLn "\n==================================\n"
@@ -421,9 +421,12 @@ loop depth pos = do
 			putStrConsole "\nEnter command:\n> "
 			s <- getLine
 			case s of
-				"s" -> do
+				(c:_) | c `elem` "si" -> do
+					let search_fun = case c of
+						's' -> single_search
+						'i' -> iterative_deepening
 					putStrConsoleLn "Searching..."
-					((val,line),s) <- runStateT (iterative_deepening depth pos) initialSearchState
+					((val,line),s) <- runStateT (search_fun depth pos) initialSearchState
 					case line of
 						[] -> putStrConsoleLn $ printf "Value = %+2.2f, no move possible." val
 						best_move:_ -> do
@@ -480,25 +483,25 @@ comp_progress ts ((i,n):ins) = product ts * fromIntegral i / fromIntegral n + co
 
 type SearchMonad a = StateT SearchState IO a
 
-{-
-search :: Depth -> Position -> SearchMonad (Rating,[Move])
-search maxdepth position = do
-	(res,_) <- do_search maxdepth 0 position [] (-mAX_RATING,mAX_RATING) IntMap.empty
+single_search depth position = do
+	(res,_,_) <- do_search depth 0 position [] (-mAX_RATING,mAX_RATING) [] Nothing
 	return res
--}
 
 iterative_deepening :: Depth -> Position -> SearchMonad (Rating,[Move])
 iterative_deepening maxdepth position = do
-	((rating,best_line),killermoves,αβ) <- do_search 4 0 position [] (-mAX_RATING,mAX_RATING) []
-	(res,_) <- iter 6 αβ
+	((rating,best_line),killermoves,(α,β)) <- do_search 4 0 position [] (-mAX_RATING,mAX_RATING) [] Nothing
+	res <- iter 6 (α,β) best_line
 	return res
 	where
-	iter depth αβ = do
-		putStrConsoleLn $ printf "\n========== iter : depth %i (max. %i)\n" (show depth) (show maxdepth)
-		(res,killermoves,αβ') <- do_search depth 0 position [] αβ []
-		case depth >= maxdepth of
+	iter m_depth (α,β) principal_var = do
+		liftIO $ do
+			putStrConsoleLn $ printf "\n========== iter : m_depth=%i,  maxdepth=%i" m_depth maxdepth
+			putStrConsoleLn $ printf "== alpha/beta=(%+.2f,%+.2f),  principal_var: %s\n" α β (showLine principal_var)
+		put initialSearchState
+		(res@(_,best_line),killermoves,αβ') <- do_search m_depth 0 position [] (α,β) [] (Just principal_var)
+		case m_depth >= maxdepth of
 			True  -> return res
-			False -> iter (depth+2) αβ'
+			False -> iter (m_depth+2) αβ' best_line
 		
 
 debug_here depth str current_line αβ = do
@@ -523,10 +526,11 @@ type KillerMoves = [Move]
 
 numKillerMoves = 5
 
-do_search :: Depth -> Depth -> Position -> [Move] -> (Rating,Rating) -> KillerMoves -> SearchMonad ((Rating,[Move]),KillerMoves,(Rating,Rating))
-do_search maxdepth depth position current_line (α,β) killermoves =
+do_search :: Depth -> Depth -> Position -> [Move] -> (Rating,Rating) -> KillerMoves -> Maybe [Move] -> SearchMonad ((Rating,[Move]),KillerMoves,(Rating,Rating))
+do_search maxdepth depth position current_line (α,β) killermoves mb_principal_var = do
+--	liftIO $ putStrConsoleLn $ printf "\n----- do_search maxdepth=%i  depth=%i\n" maxdepth depth
 	case moveGenerator position of
-		Left  _  -> return ((evalPosition position,[]),killermoves)
+		Left  _  -> return ((evalPosition position,[]),killermoves,(α,β))
 		Right unsorted_moves -> do
 			hashmap <- gets positionHashtable
 			case HashMap.lookup position hashmap of
@@ -536,9 +540,10 @@ do_search maxdepth depth position current_line (α,β) killermoves =
 				Nothing -> do
 					modify' $ \ s -> s { memoizationMisses = memoizationMisses s + 1 }
 					let
+						principal_moves = maybe [] ((take 1) . (drop depth)) mb_principal_var
 						presorted_moves = reverse $ sortBy (comparing move_sort_val) unsorted_moves
 						kill_moves = killermoves `intersect` presorted_moves
-						moves = kill_moves ++ (presorted_moves \\ kill_moves)
+						moves = principal_moves ++ ((kill_moves ++ (presorted_moves \\ kill_moves)) \\ principal_moves)
 					modify' $ \ s -> s { computationProgress = (0,length moves) : computationProgress s }
 					(res,killer_moves',(α',β')) <- find_best_line (worst_val,[]) moves (α,β) killermoves
 					modify' $ \ s -> s { positionHashtable = HashMap.insert position res (positionHashtable s) }
@@ -569,7 +574,9 @@ do_search maxdepth depth position current_line (α,β) killermoves =
 			modify' $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
 
 			((this_val,this_subline),sub_killer_moves) <- case depth' < maxdepth of
-				True -> do_search maxdepth depth' position' current_line' (α,β) killermoves
+				True -> do
+					(res,sub_killer_moves,_) <- do_search maxdepth depth' position' current_line' (α,β) killermoves mb_principal_var
+					return (res,sub_killer_moves)
 				False -> do
 					modify' $ \ s -> s {
 						leavesProcessed = leavesProcessed s + 1,
@@ -579,11 +586,10 @@ do_search maxdepth depth position current_line (α,β) killermoves =
 					TOD current_secs _ <- liftIO $ getClockTime
 					when (current_secs - last_output_secs >=1) $ do
 						s <- get
-						liftIO $ putStrConsoleLn $ printf "[%3.0f%%]  Cutoffs:%i/%i  KillerMoveHits:%i  MemoPos's:%i MemoHits:%i MemoMisses: %i Best line: %+.2f  <-  %s"
+						liftIO $ putStrConsoleLn $ printf "[%3.0f%%]  Cutoffs:%i/%i  KillerMoveHits:%i  MemoPos's:%i MemoHits:%i MemoMisses: %i"
 							(100.0 * comp_progress [] (reverse $ computationProgress s))
 							(αCutoffs s) (βCutoffs s)
 							(killerMoveHits s) (HashMap.size (positionHashtable s)) (memoizationHits s) (memoizationMisses s)
-							(bestVal s) (showLine (bestLine s))
 						modify' $ \ s -> s { lastStateOutputTime = current_secs }
 					return $ ((evalPosition position',[]),[])			
 
