@@ -423,7 +423,7 @@ loop depth pos = do
 			case s of
 				"s" -> do
 					putStrConsoleLn "Searching..."
-					((val,line),s) <- runStateT (search depth pos) initialSearchState
+					((val,line),s) <- runStateT (iterative_deepening depth pos) initialSearchState
 					case line of
 						[] -> putStrConsoleLn $ printf "Value = %+2.2f, no move possible." val
 						best_move:_ -> do
@@ -454,11 +454,11 @@ showLine :: [Move] -> String
 showLine moves = intercalate ", " (map showMove_FromTo moves)
 
 data SearchState = SearchState {
-	debugMode       :: Bool,
-	nodesProcessed  :: Int,
-	leavesProcessed :: Int,
-	evaluationsDone :: Int,
-	bestLineUpdates :: Int,
+	debugMode           :: Bool,
+	nodesProcessed      :: Int,
+	leavesProcessed     :: Int,
+	evaluationsDone     :: Int,
+	bestLineUpdates     :: Int,
 	lastStateOutputTime :: Integer,
 	bestLine            :: [Move],
 	bestVal             :: Rating,
@@ -480,10 +480,23 @@ comp_progress ts ((i,n):ins) = product ts * fromIntegral i / fromIntegral n + co
 
 type SearchMonad a = StateT SearchState IO a
 
+{-
 search :: Depth -> Position -> SearchMonad (Rating,[Move])
 search maxdepth position = do
 	(res,_) <- do_search maxdepth 0 position [] (-mAX_RATING,mAX_RATING) IntMap.empty
 	return res
+-}
+
+iterative_deepening :: Depth -> Position -> SearchMonad (Rating,[Move])
+iterative_deepening maxdepth position = do
+	((rating,best_line),_,αβ) <- do_search 4 0 position [] (-mAX_RATING,mAX_RATING) IntMap.empty
+	(res,_) <- iter 4 (-mAX_RATING,mAX_RATING) IntMap.empty
+	return res
+	where
+	iter depth = do
+		putStrConsoleLn $ printf "\n========== iter : depth %i (max. %i)\n" (show depth) (show maxdepth)
+		((rating,best_line),killermoves) <- do_search depth 0 position [] (-mAX_RATING,mAX_RATING) IntMap.empty
+	
 
 debug_here depth str current_line αβ = do
 	s <- get
@@ -508,7 +521,7 @@ type KillerMoves = IntMap.IntMap [Move]
 numKillerMoves = 5
 uniteKillerMoves ms1 ms2 = take numKillerMoves (union ms1 ms2)
 
-do_search :: Depth -> Depth -> Position -> [Move] -> (Rating,Rating) -> KillerMoves -> SearchMonad ((Rating,[Move]),KillerMoves)
+do_search :: Depth -> Depth -> Position -> [Move] -> (Rating,Rating) -> KillerMoves -> SearchMonad ((Rating,[Move]),KillerMoves,(Rating,Rating))
 do_search maxdepth depth position current_line (α,β) killermoves =
 	case moveGenerator position of
 		Left  _  -> return ((evalPosition position,[]),killermoves)
@@ -517,7 +530,7 @@ do_search maxdepth depth position current_line (α,β) killermoves =
 			case HashMap.lookup position hashmap of
 				Just res -> do
 					modify' $ \ s -> s { memoizationHits = memoizationHits s + 1 }
-					return (res,killermoves)
+					return (res,killermoves,(α,β))
 				Nothing -> do
 					modify' $ \ s -> s { memoizationMisses = memoizationMisses s + 1 }
 					let
@@ -525,12 +538,12 @@ do_search maxdepth depth position current_line (α,β) killermoves =
 						kill_moves = (IntMap.findWithDefault [] depth killermoves) `intersect` presorted_moves
 						moves = kill_moves ++ (presorted_moves \\ kill_moves)
 					modify' $ \ s -> s { computationProgress = (0,length moves) : computationProgress s }
-					(res,killer_moves') <- find_best_line (worst_val,[]) moves (α,β) killermoves
+					(res,killer_moves',(α',β')) <- find_best_line (worst_val,[]) moves (α,β) killermoves
 					modify' $ \ s -> s { positionHashtable = HashMap.insert position res (positionHashtable s) }
-					debug_here depth ("find_best_line returned " ++ show res) current_line (α,β)
+					debug_here depth ("find_best_line returned " ++ show res) current_line (α',β')
 					modify' $ \ s -> s { computationProgress = tail (computationProgress s) }
-					debug_here depth "AFTER FIND_BEST_LINE" current_line (α,β)
-					return (res,killer_moves')
+					debug_here depth "AFTER FIND_BEST_LINE" current_line (α',β')
+					return (res,killer_moves',(α',β'))
 
 		where
 
@@ -544,7 +557,7 @@ do_search maxdepth depth position current_line (α,β) killermoves =
 			White -> (α,(>),max)
 			Black -> (β,(<),min)
 
-		find_best_line :: (Rating,[Move]) -> [Move] -> (Rating,Rating) -> KillerMoves -> SearchMonad ((Rating,[Move]),KillerMoves)
+		find_best_line :: (Rating,[Move]) -> [Move] -> (Rating,Rating) -> KillerMoves -> SearchMonad ((Rating,[Move]),KillerMoves,(Rating,Rating))
 		find_best_line best@(best_val,best_line) (move:moves) (α,β) killermoves = do
 			let
 				current_line' = current_line ++ [move]
@@ -595,7 +608,7 @@ do_search maxdepth depth position current_line (α,β) killermoves =
 				False -> case moves of
 					[] -> do
 						debug_here depth ("find_best_line [] returned " ++ show best) current_line (α,β)
-						return (best,killermoves')
+						return (best,killermoves',(α',β'))
 					_  -> find_best_line best' moves (α',β') killermoves'
 				True -> do
 					case positionColourToMove position of
@@ -610,4 +623,4 @@ do_search maxdepth depth position current_line (α,β) killermoves =
 							modify' $ \ s -> s { killerMoveHits = killerMoveHits s + 1 }
 							return killermoves'
 						_ -> return $ IntMap.insertWith uniteKillerMoves depth [move] killermoves'
-					return (best,killermoves'')
+					return (best,killermoves'',(α',β'))
