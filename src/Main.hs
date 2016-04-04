@@ -489,14 +489,17 @@ search maxdepth position = do
 
 iterative_deepening :: Depth -> Position -> SearchMonad (Rating,[Move])
 iterative_deepening maxdepth position = do
-	((rating,best_line),_,αβ) <- do_search 4 0 position [] (-mAX_RATING,mAX_RATING) IntMap.empty
-	(res,_) <- iter 4 (-mAX_RATING,mAX_RATING) IntMap.empty
+	((rating,best_line),killermoves,αβ) <- do_search 4 0 position [] (-mAX_RATING,mAX_RATING) []
+	(res,_) <- iter 6 αβ
 	return res
 	where
-	iter depth = do
+	iter depth αβ = do
 		putStrConsoleLn $ printf "\n========== iter : depth %i (max. %i)\n" (show depth) (show maxdepth)
-		((rating,best_line),killermoves) <- do_search depth 0 position [] (-mAX_RATING,mAX_RATING) IntMap.empty
-	
+		(res,killermoves,αβ') <- do_search depth 0 position [] αβ []
+		case depth >= maxdepth of
+			True  -> return res
+			False -> iter (depth+2) αβ'
+		
 
 debug_here depth str current_line αβ = do
 	s <- get
@@ -516,10 +519,9 @@ debug_here depth str current_line αβ = do
 			"d0" -> modify' $ \ s -> s { debugMode = False }
 			_ -> return ()
 
-type KillerMoves = IntMap.IntMap [Move]
+type KillerMoves = [Move]
 
 numKillerMoves = 5
-uniteKillerMoves ms1 ms2 = take numKillerMoves (union ms1 ms2)
 
 do_search :: Depth -> Depth -> Position -> [Move] -> (Rating,Rating) -> KillerMoves -> SearchMonad ((Rating,[Move]),KillerMoves,(Rating,Rating))
 do_search maxdepth depth position current_line (α,β) killermoves =
@@ -535,7 +537,7 @@ do_search maxdepth depth position current_line (α,β) killermoves =
 					modify' $ \ s -> s { memoizationMisses = memoizationMisses s + 1 }
 					let
 						presorted_moves = reverse $ sortBy (comparing move_sort_val) unsorted_moves
-						kill_moves = (IntMap.findWithDefault [] depth killermoves) `intersect` presorted_moves
+						kill_moves = killermoves `intersect` presorted_moves
 						moves = kill_moves ++ (presorted_moves \\ kill_moves)
 					modify' $ \ s -> s { computationProgress = (0,length moves) : computationProgress s }
 					(res,killer_moves',(α',β')) <- find_best_line (worst_val,[]) moves (α,β) killermoves
@@ -583,9 +585,9 @@ do_search maxdepth depth position current_line (α,β) killermoves =
 							(killerMoveHits s) (HashMap.size (positionHashtable s)) (memoizationHits s) (memoizationMisses s)
 							(bestVal s) (showLine (bestLine s))
 						modify' $ \ s -> s { lastStateOutputTime = current_secs }
-					return $ ((evalPosition position',[]),IntMap.empty)			
+					return $ ((evalPosition position',[]),[])			
 
-			let killermoves' = IntMap.unionWith uniteKillerMoves sub_killer_moves killermoves
+			let killermoves' = take numKillerMoves $ union sub_killer_moves killermoves
 
 			best'@(best_val',_) <- case this_val `isBetterThan` best_val of
 				True -> do
@@ -618,9 +620,9 @@ do_search maxdepth depth position current_line (α,β) killermoves =
 						Black -> do
 							debug_here depth' "alpha CUTOFF: " current_line' (α,β)
 							modify' $ \ s -> s { αCutoffs = αCutoffs s + 1 }
-					killermoves'' <- case IntMap.lookup depth killermoves of
-						Just kms | move `elem` kms -> do
+					killermoves'' <- case move `elem` killermoves of
+						True -> do
 							modify' $ \ s -> s { killerMoveHits = killerMoveHits s + 1 }
 							return killermoves'
-						_ -> return $ IntMap.insertWith uniteKillerMoves depth [move] killermoves'
+						False -> return $ take numKillerMoves (move : killermoves')
 					return (best,killermoves'',(α',β'))
