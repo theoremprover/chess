@@ -20,6 +20,8 @@ import System.Time
 import qualified Data.IntMap.Strict as IntMap
 import Text.Parsec
 
+import System.IO.Unsafe
+
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.UTF8 as BSU
 
@@ -165,9 +167,18 @@ moveGenerator position@(Position board colour_to_move cancastlequeen cancastleki
 				else []
 			of
 			[] -> Left $ (if no_check position (kings_coors position) then Stalemate else Checkmate) colour_to_move
-			moves -> Right moves
+			moves -> Right $ map checkmv moves
 
 	where
+
+	checkmv mv = let
+		pos' = doMove position mv
+		in
+		case [ coors | (coors,Just (col,Þ)) <- assocs (positionBoard pos'), col==positionColourToMove pos' ] of
+			[] -> error $ show mv ++ " in pos " ++ (unsafePerformIO $ do
+				liftIO $ showPos position
+				return "")
+			_ -> mv
 
 	castle_rank = castleRank colour_to_move
 
@@ -528,7 +539,7 @@ numKillerMoves = 5
 
 do_search :: Depth -> Depth -> Position -> [Move] -> (Rating,Rating) -> KillerMoves -> Maybe [Move] -> SearchMonad ((Rating,[Move]),KillerMoves,(Rating,Rating))
 do_search maxdepth depth position current_line (α,β) killermoves mb_principal_var = do
---	liftIO $ putStrConsoleLn $ printf "\n----- do_search maxdepth=%i  depth=%i\n" maxdepth depth
+--	liftIO $ putStrConsoleLn $ printf "----- CURRENT LINE: %s " (showLine current_line)
 	case moveGenerator position of
 		Left  _  -> return ((evalPosition position,[]),killermoves,(α,β))
 		Right unsorted_moves -> do
