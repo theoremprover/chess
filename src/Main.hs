@@ -19,6 +19,7 @@ import Data.Ord
 import System.Time
 import qualified Data.IntMap.Strict as IntMap
 import Text.Parsec
+import Text.Parsec.String
 
 import System.IO.Unsafe
 
@@ -290,6 +291,9 @@ epd_p = do
 		where
 		Right moves = moveGenerator pos 
 
+testsuite_p = sepBy epd_p (spaces >> newline)
+	
+
 t = do
 	f <- readFile "BK-Test.txt"
 	let ls = lines f
@@ -447,6 +451,7 @@ loop depth pos = do
 							do_move best_move
 				"b" -> return ()
 				"q" -> error $ "Quit."
+				"t" -> runTestSuite depth
 				depthstr | length depthstr > 0 && all isDigit depthstr -> do
 					let (depth',""):_ = (reads :: ReadS Int) depthstr
 					putStrConsoleLn $ "Setting depth = " ++ show depth'
@@ -462,10 +467,35 @@ loop depth pos = do
 		loop depth (doMove pos move)
 		loop depth pos
 
+runTestSuite depth = do
+	case parseFromFile testsuite_p "BK-Test.txt" of
+		Left err -> error err
+		Right tests -> do
+			res <- forM tests $ \ (name,pos,best_moves) -> do
+				putStrConsoleLn $ printf "\n###############################################"
+				putStrConsoleLn $ printf "# Test %s\n" name
+				(_,bm:_) <- evalStateT (iterative_deepening depth pos) initialSearchState
+				putStrConsoleLn $ printf "Found    best move  %s" (showMove pos bm)
+				putStrConsoleLn $ printf "Expected best moves %s" (intercalate "," (map (showMove pos) best_moves))
+				verdict <- case bm `elem` best_moves of
+					False -> do
+						putStrConsoleLn $ printf "=> FAIL !"
+						return False
+					True -> do
+						putStrConsoleLn $ printf "=> OK."
+						return True
+				return (name,pos,bm,best_moves,verdict)
+
+			forM_ res $ \ (name,pos,bm,best_moves,verdict) -> do
+				putStrConsoleLn $ printf "Test %-7s: Expected %-5s, Found %-5s => %s" name (showMove pos bm)
+					(intercalate "," (map (showMove pos) best_moves)) (if verdict then "OK" else "FAIL")
+
 showMove_FromTo Move{..} = showCoors moveFrom ++ showCoors moveTo ++ maybe "" pieceStr movePromote
 
 showLine :: [Move] -> String
 showLine moves = intercalate ", " (map showMove_FromTo moves)
+
+readMove pos movestr = head [ move | let Right moves = moveGenerator pos, move <- moves, movestr == showMove_FromTo move ]
 
 data SearchState = SearchState {
 	debugMode           :: Bool,
@@ -554,7 +584,7 @@ do_search maxdepth depth position current_line (α,β) killermoves mb_principal_
 						principal_moves = maybe [] ((take 1) . (drop depth)) mb_principal_var
 						presorted_moves = reverse $ sortBy (comparing move_sort_val) unsorted_moves
 						kill_moves = killermoves `intersect` presorted_moves
-						moves = principal_moves ++ ((kill_moves ++ (presorted_moves \\ kill_moves)) \\ principal_moves)
+						moves = principal_moves `intersect` presorted_moves ++ ((kill_moves ++ (presorted_moves \\ kill_moves)) \\ principal_moves)
 					modify' $ \ s -> s { computationProgress = (0,length moves) : computationProgress s }
 					(res,killer_moves',(α',β')) <- find_best_line (worst_val,[]) moves (α,β) killermoves
 					modify' $ \ s -> s { positionHashtable = HashMap.insert position res (positionHashtable s) }
@@ -597,7 +627,7 @@ do_search maxdepth depth position current_line (α,β) killermoves mb_principal_
 					TOD current_secs _ <- liftIO $ getClockTime
 					when (current_secs - last_output_secs >=1) $ do
 						s <- get
-						liftIO $ putStrConsoleLn $ printf "[%3.0f%%]  Cutoffs:%i/%i  KillerMoveHits:%i  MemoPos's:%i MemoHits:%i MemoMisses: %i"
+						liftIO $ putStrConsole $ printf "[%3.0f%%]  Cuts:%i/%i  KillerHits:%i  Memo(Pos:%i Hits:%i Miss:%i)    \r"
 							(100.0 * comp_progress [] (reverse $ computationProgress s))
 							(αCutoffs s) (βCutoffs s)
 							(killerMoveHits s) (HashMap.size (positionHashtable s)) (memoizationHits s) (memoizationMisses s)
