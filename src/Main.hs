@@ -20,8 +20,8 @@ import System.Time
 import qualified Data.IntMap.Strict as IntMap
 import Text.Parsec
 import Text.Parsec.String
-
-import System.IO.Unsafe
+import System.IO
+--import System.IO.Unsafe
 
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.UTF8 as BSU
@@ -168,18 +168,9 @@ moveGenerator position@(Position board colour_to_move cancastlequeen cancastleki
 				else []
 			of
 			[] -> Left $ (if no_check position (kings_coors position) then Stalemate else Checkmate) colour_to_move
-			moves -> Right $ map checkmv moves
+			moves -> Right moves
 
 	where
-
-	checkmv mv = let
-		pos' = doMove position mv
-		in
-		case [ coors | (coors,Just (col,Þ)) <- assocs (positionBoard pos'), col==positionColourToMove pos' ] of
-			[] -> error $ show mv ++ " in pos " ++ (unsafePerformIO $ do
-				liftIO $ showPos position
-				return "")
-			_ -> mv
 
 	castle_rank = castleRank colour_to_move
 
@@ -249,6 +240,7 @@ evalPosition pos@Position{..} = case moveGenerator pos of
 
 putStrConsole s = do
 	putStr s
+	hFlush stdout
 --	BSC.putStrLn $ BSU.fromString s
 --	appendFile "test.txt" (s++"\n")
 
@@ -286,18 +278,18 @@ epd_p = do
 	string ";"
 	return (idstr,pos,line)
 	where
-	movestr_p (str,move) = string str >> return move
+	movestr_p (str,move) = try (string str >> return move)
 	move_p pos = choice $ map movestr_p $ zip (map (showMove pos) moves) moves
 		where
 		Right moves = moveGenerator pos 
 
-testsuite_p = sepBy epd_p (spaces >> newline)
-	
+testsuite_p = sepBy epd_p (skipMany (string " ") >> endOfLine)
 
 t = do
 	f <- readFile "BK-Test.txt"
 	let ls = lines f
-	print $ parse epd_p "" (ls!!1) 
+	forM_ ls $ \ l -> do
+		print $ parse epd_p "" l
 
 fromFEN :: String -> Either ParseError Position
 fromFEN = parse fen_p ""
@@ -416,7 +408,7 @@ showMoves pos moves = showline moves where
 main = do
 --	writeFile "test.txt" ""
 	putStrConsoleLn "Cutoffs  ëÚêÝíÛéÜ"
-	loop 8 testPosition
+	loop 6 testPosition
 
 loop depth pos = do
 	putStrConsoleLn "\n==================================\n"
@@ -468,12 +460,14 @@ loop depth pos = do
 		loop depth pos
 
 runTestSuite depth = do
-	case parseFromFile testsuite_p "BK-Test.txt" of
-		Left err -> error err
+	res <- parseFromFile testsuite_p "BK-Test.txt"
+	case res of
+		Left err -> error $ show err
 		Right tests -> do
 			res <- forM tests $ \ (name,pos,best_moves) -> do
 				putStrConsoleLn $ printf "\n###############################################"
 				putStrConsoleLn $ printf "# Test %s\n" name
+				showPos pos
 				(_,bm:_) <- evalStateT (iterative_deepening depth pos) initialSearchState
 				putStrConsoleLn $ printf "Found    best move  %s" (showMove pos bm)
 				putStrConsoleLn $ printf "Expected best moves %s" (intercalate "," (map (showMove pos) best_moves))
@@ -482,13 +476,13 @@ runTestSuite depth = do
 						putStrConsoleLn $ printf "=> FAIL !"
 						return False
 					True -> do
-						putStrConsoleLn $ printf "=> OK."
+						putStrConsoleLn $ printf "=> ok."
 						return True
 				return (name,pos,bm,best_moves,verdict)
 
 			forM_ res $ \ (name,pos,bm,best_moves,verdict) -> do
 				putStrConsoleLn $ printf "Test %-7s: Expected %-5s, Found %-5s => %s" name (showMove pos bm)
-					(intercalate "," (map (showMove pos) best_moves)) (if verdict then "OK" else "FAIL")
+					(intercalate "," (map (showMove pos) best_moves)) (if verdict then "ok" else "FAIL")
 
 showMove_FromTo Move{..} = showCoors moveFrom ++ showCoors moveTo ++ maybe "" pieceStr movePromote
 
@@ -496,6 +490,10 @@ showLine :: [Move] -> String
 showLine moves = intercalate ", " (map showMove_FromTo moves)
 
 readMove pos movestr = head [ move | let Right moves = moveGenerator pos, move <- moves, movestr == showMove_FromTo move ]
+
+showMovesInPos pos = do
+	let Right moves = moveGenerator pos
+	putStrLn $ intercalate " " (map (showMove pos) moves)
 
 data SearchState = SearchState {
 	debugMode           :: Bool,
@@ -539,10 +537,16 @@ iterative_deepening maxdepth position = do
 			putStrConsoleLn $ printf "\n========== iter : m_depth=%i,  maxdepth=%i" m_depth maxdepth
 			putStrConsoleLn $ printf "== alpha/beta=(%+.2f,%+.2f),  principal_var: %s\n" α β (showLine principal_var)
 		put initialSearchState
-		(res@(_,best_line),killermoves,αβ') <- do_search m_depth 0 position [] (α,β) [] (Just principal_var)
+		(res@(_,best_line),killermoves,αβ'@(α',β')) <- do_search m_depth 0 position [] (α,β) [] (Just principal_var)
+		(res'@(_,best_line'),_,αβ'') <- case best_line of
+			[] -> do
+				let αβ_new@(α_new,β_new) = (α-1.5,β+1.5)
+				liftIO $ putStrConsoleLn $ printf "FAIL, widening (%+.2f,%+.2f) to (%+.2f,%+.2f)\n" α β α_new β_new
+				iter m_depth αβ_new (Just principal_var)
+			_  -> return (res,killermoves,αβ')
 		case m_depth >= maxdepth of
-			True  -> return res
-			False -> iter (m_depth+2) αβ' best_line
+			True  -> return res'
+			False -> iter (m_depth+2) αβ'' best_line'
 		
 
 debug_here depth str current_line αβ = do
