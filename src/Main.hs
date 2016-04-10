@@ -1,5 +1,7 @@
 {-# LANGUAGE TupleSections,TypeSynonymInstances,FlexibleInstances,ScopedTypeVariables,RecordWildCards,FlexibleContexts,UnicodeSyntax,DeriveGeneric #-}
 
+-- Profling: ghc -prof -fprof-auto -O2 --make Main.hs
+
 module Main where
 
 import GHC.Generics (Generic)
@@ -21,7 +23,7 @@ import qualified Data.IntMap.Strict as IntMap
 import Text.Parsec
 import Text.Parsec.String
 import System.IO
---import System.IO.Unsafe
+import System.CPUTime
 
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.UTF8 as BSU
@@ -238,7 +240,7 @@ evalPosition pos@Position{..} = case moveGenerator pos of
 			pawn_targetrank = if colour==White then 8 else 1
 			proximity_to_centre = 5.0 - sqrt ( (abs (4.5 - fromIntegral r))^2 + (abs (4.5 - fromIntegral f))^2 )
 
-putStrConsole s = do
+putStrConsole s = liftIO $ do
 	putStr s
 	hFlush stdout
 --	BSC.putStrLn $ BSU.fromString s
@@ -439,7 +441,7 @@ loop depth pos = do
 						best_move:_ -> do
 							putStrConsoleLn $ showSearchState s
 							putStrConsoleLn $ "Found best move " ++ showMove pos best_move
-							putStrConsoleLn $ "Best line: " ++ showLine line
+							putStrConsoleLn $ "Best line: " ++ showMovesPretty pos line
 							do_move best_move
 				"b" -> return ()
 				"q" -> error $ "Quit."
@@ -469,8 +471,8 @@ runTestSuite depth = do
 				putStrConsoleLn $ printf "# Test %s\n" name
 				showPos pos
 				(_,bm:_) <- evalStateT (iterative_deepening depth pos) initialSearchState
-				putStrConsoleLn $ printf "Found    best move  %s" (showMove pos bm)
-				putStrConsoleLn $ printf "Expected best moves %s" (intercalate "," (map (showMove pos) best_moves))
+				putStrConsoleLn $ printf "Found    best line  %s" (showMove pos bm)
+				putStrConsoleLn $ printf "Expected best moves %s" (showMovesPretty pos best_moves)
 				verdict <- case bm `elem` best_moves of
 					False -> do
 						putStrConsoleLn $ printf "=> FAIL !"
@@ -482,7 +484,7 @@ runTestSuite depth = do
 
 			forM_ res $ \ (name,pos,bm,best_moves,verdict) -> do
 				putStrConsoleLn $ printf "Test %-7s: Expected %-5s, Found %-5s => %s" name (showMove pos bm)
-					(intercalate "," (map (showMove pos) best_moves)) (if verdict then "ok" else "FAIL")
+					(showMovesPretty pos best_moves) (if verdict then "ok" else "FAIL")
 
 showMove_FromTo Move{..} = showCoors moveFrom ++ showCoors moveTo ++ maybe "" pieceStr movePromote
 
@@ -491,17 +493,21 @@ showLine moves = intercalate ", " (map showMove_FromTo moves)
 
 readMove pos movestr = head [ move | let Right moves = moveGenerator pos, move <- moves, movestr == showMove_FromTo move ]
 
+showMovesPretty pos moves = intercalate ", " $ map (showMove pos) moves
+
 showMovesInPos pos = do
 	let Right moves = moveGenerator pos
-	putStrLn $ intercalate " " (map (showMove pos) moves)
+	putStrLn $ showMovesPretty pos moves
 
 data SearchState = SearchState {
 	debugMode           :: Bool,
 	nodesProcessed      :: Int,
+	lastNodesProcessed  :: Int,
 	leavesProcessed     :: Int,
 	evaluationsDone     :: Int,
 	bestLineUpdates     :: Int,
 	lastStateOutputTime :: Integer,
+	lastCPUTime         :: Integer,
 	bestLine            :: [Move],
 	bestVal             :: Rating,
 	αCutoffs            :: Int,
@@ -512,7 +518,7 @@ data SearchState = SearchState {
 	memoizationMisses   :: Int,
 	positionHashtable   :: HashMap.HashMap Position (Rating,[Move]) }
 	deriving (Show)
-initialSearchState = SearchState False 0 0 0 0 0 [] 0.0 0 0 [] 0 0 0 HashMap.empty
+initialSearchState = SearchState False 0 0 0 0 0 0 0 [] 0.0 0 0 [] 0 0 0 HashMap.empty
 
 showSearchState s = printf "Tot. %i Nodes, %i Leaves, %i Evals, bestLineUpdates=%i, alpha/beta-Cutoffs=%i/%i"
 	(nodesProcessed s) (leavesProcessed s) (evaluationsDone s) (bestLineUpdates s) (αCutoffs s) (βCutoffs s)
@@ -532,27 +538,27 @@ iterative_deepening maxdepth position = do
 	res <- iter 6 (α,β) best_line
 	return res
 	where
+	iter :: Depth -> (Rating,Rating) -> [Move] -> SearchMonad (Rating,[Move])
 	iter m_depth (α,β) principal_var = do
-		liftIO $ do
-			putStrConsoleLn $ printf "\n========== iter : m_depth=%i,  maxdepth=%i" m_depth maxdepth
-			putStrConsoleLn $ printf "== alpha/beta=(%+.2f,%+.2f),  principal_var: %s\n" α β (showLine principal_var)
+		putStrConsoleLn $ printf "\n========== iter : m_depth=%i,  maxdepth=%i" m_depth maxdepth
+		putStrConsoleLn $ printf "== alpha/beta=(%+.2f,%+.2f),  principal_var: %s\n" α β (showLine principal_var)
 		put initialSearchState
 		(res@(_,best_line),killermoves,αβ'@(α',β')) <- do_search m_depth 0 position [] (α,β) [] (Just principal_var)
-		(res'@(_,best_line'),_,αβ'') <- case best_line of
+		putStrConsoleLn $ printf "\n\n Found best line %s" (showMovesPretty position best_line)
+		case best_line of
 			[] -> do
 				let αβ_new@(α_new,β_new) = (α-1.5,β+1.5)
-				liftIO $ putStrConsoleLn $ printf "FAIL, widening (%+.2f,%+.2f) to (%+.2f,%+.2f)\n" α β α_new β_new
-				iter m_depth αβ_new (Just principal_var)
-			_  -> return (res,killermoves,αβ')
-		case m_depth >= maxdepth of
-			True  -> return res'
-			False -> iter (m_depth+2) αβ'' best_line'
+				putStrConsoleLn $ printf "FAIL, widening (%+.2f,%+.2f) to (%+.2f,%+.2f)\n" α β α_new β_new
+				iter m_depth αβ_new principal_var
+			_  -> case m_depth >= maxdepth of
+				True  -> return res
+				False -> iter (m_depth+2) αβ' best_line
 		
 
 debug_here depth str current_line αβ = do
 	s <- get
 	when (debugMode s) $ do
-		input <- liftIO $ do
+		input <- do
 			putStrConsoleLn $ "\n========== " ++ str
 			putStrConsoleLn $ printf "Depth=%i, Best Rating=%+.2f" depth (bestVal s)
 			putStrConsoleLn $ "Best Line: " ++ showLine (bestLine s)
@@ -562,7 +568,7 @@ debug_here depth str current_line αβ = do
 			putStrConsoleLn $ printf "alphaCutoffs = %i, betaCutoffs = %i" (αCutoffs s) (βCutoffs s)
 			putStrConsoleLn $ "============================"
 			putStrConsoleLn "Press Enter or 'd0'"
-			getLine
+			liftIO getLine
 		case input of
 			"d0" -> modify' $ \ s -> s { debugMode = False }
 			_ -> return ()
@@ -573,7 +579,7 @@ numKillerMoves = 5
 
 do_search :: Depth -> Depth -> Position -> [Move] -> (Rating,Rating) -> KillerMoves -> Maybe [Move] -> SearchMonad ((Rating,[Move]),KillerMoves,(Rating,Rating))
 do_search maxdepth depth position current_line (α,β) killermoves mb_principal_var = do
---	liftIO $ putStrConsoleLn $ printf "----- CURRENT LINE: %s " (showLine current_line)
+--	putStrConsoleLn $ printf "----- CURRENT LINE: %s " (showLine current_line)
 	case moveGenerator position of
 		Left  _  -> return ((evalPosition position,[]),killermoves,(α,β))
 		Right unsorted_moves -> do
@@ -631,11 +637,18 @@ do_search maxdepth depth position current_line (α,β) killermoves mb_principal_
 					TOD current_secs _ <- liftIO $ getClockTime
 					when (current_secs - last_output_secs >=1) $ do
 						s <- get
-						liftIO $ putStrConsole $ printf "[%3.0f%%]  Cuts:%i/%i  KillerHits:%i  Memo(Pos:%i Hits:%i Miss:%i)    \r"
+						current_cpu_time <- liftIO $ getCPUTime
+						let nodes_per_sec = div (1000000 * fromIntegral $ nodesProcessed s - lastNodesProcessed s)
+							(max (div (current_cpu_time - lastCPUTime s) 1000000) 1)
+						putStrConsole $ printf "[%3.0f%%] %4i Nodes/s Cuts:%i/%i  KillerHits:%i  Memo(Pos:%i Hits:%i Miss:%i)    \r"
 							(100.0 * comp_progress [] (reverse $ computationProgress s))
+							nodes_per_sec
 							(αCutoffs s) (βCutoffs s)
 							(killerMoveHits s) (HashMap.size (positionHashtable s)) (memoizationHits s) (memoizationMisses s)
-						modify' $ \ s -> s { lastStateOutputTime = current_secs }
+						modify' $ \ s -> s {
+							lastStateOutputTime = current_secs,
+							lastNodesProcessed = nodesProcessed s,
+							lastCPUTime = current_cpu_time }
 					return $ ((evalPosition position',[]),[])			
 
 			let killermoves' = take numKillerMoves $ union sub_killer_moves killermoves
