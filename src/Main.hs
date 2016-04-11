@@ -466,7 +466,7 @@ runTestSuite depth = do
 	case res of
 		Left err -> error $ show err
 		Right tests -> do
-			res <- forM tests $ \ (name,pos,best_moves) -> do
+			res <- forM [tests!!2]{-tests-} $ \ (name,pos,best_moves) -> do
 				putStrConsoleLn $ printf "\n###############################################"
 				putStrConsoleLn $ printf "# Test %s\n" name
 				showPos pos
