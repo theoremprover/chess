@@ -512,19 +512,17 @@ data SearchState = SearchState {
 	bestLineUpdates     :: Int,
 	lastStateOutputTime :: Integer,
 	lastCPUTime         :: Integer,
-	bestLine            :: [Move],
-	bestVal             :: Rating,
 	αCutoffs            :: Int,
 	βCutoffs            :: Int,
 	computationProgress :: [(Int,Int)],
 	killerMoveHits      :: Int,
 	memoizationHits     :: Int,
 	memoizationMisses   :: Int,
-	positionHashtable   :: HashMap.HashMap Position (Rating,[Move]),
+	positionHashtable   :: HashMap.HashMap Position (Rating,Line),
 	killerMoves         :: IntMap [Move],
-	principalVariation  :: [Move] }
+	principalVariation  :: Line }
 	deriving (Show)
-initialSearchState = SearchState False 0 0 0 0 0 0 0 [] 0.0 0 0 [] 0 0 0 HashMap.empty IntMap.empty []
+initialSearchState = SearchState False 0 0 0 0 0 0 0 0 0 [] 0 0 0 HashMap.empty IntMap.empty []
 
 showSearchState s = printf "Tot. %i Nodes, %i Leaves, %i Evals, bestLineUpdates=%i, alpha/beta-Cutoffs=%i/%i"
 	(nodesProcessed s) (leavesProcessed s) (evaluationsDone s) (bestLineUpdates s) (αCutoffs s) (βCutoffs s)
@@ -564,30 +562,32 @@ iterative_deepening maxdepth position = do
 numKillerMovesPerPly = 3
 
 type AlphaBetaWindow = (Rating,Rating)
+type Line = [Move]
 
-do_search :: Depth -> Depth -> Position -> [Move] -> AlphaBetaWindow -> Maybe [Move] -> SearchMonad ((Rating,[Move]),AlphaBetaWindow)
+do_search :: Depth -> Depth -> Position -> Line -> AlphaBetaWindow -> SearchMonad ((Rating,Line),AlphaBetaWindow)
 do_search maxdepth depth position current_line (α,β) = do
 --	putStrConsoleLn $ printf "----- CURRENT LINE: %s " (showLine current_line)
 	case moveGenerator position of
-		Left  _  -> return ((evalPosition position,[]),killermoves,(α,β))
+		Left  _  -> return ((evalPosition position,[]),(α,β))
 		Right unsorted_moves -> do
 			hashmap <- gets positionHashtable
 			case HashMap.lookup position hashmap of
 				Just res -> do
 					modify' $ \ s -> s { memoizationHits = memoizationHits s + 1 }
-					return (res,killermoves,(α,β))
+					return (res,(α,β))
 				Nothing -> do
 					modify' $ \ s -> s { memoizationMisses = memoizationMisses s + 1 }
 					let
-						principal_moves = maybe [] ((take 1) . (drop depth)) mb_principal_var
+						principal_moves = take 1 $ drop depth $ principalVariation s
+						killer_moves = IntMap.findWithDefault [] depth (killerMoves s)
 						presorted_moves = reverse $ sortBy (comparing move_sort_val) unsorted_moves
-						kill_moves = killermoves `intersect` presorted_moves
-						moves = principal_moves `intersect` presorted_moves ++ ((kill_moves ++ (presorted_moves \\ kill_moves)) \\ principal_moves)
+						moves = (principal_moves ++ killer_moves) `intersect` presorted_moves ++
+							(presorted_moves \\ principal_moves) \\ killer_moves
 					modify' $ \ s -> s { computationProgress = (0,length moves) : computationProgress s }
-					(res,killer_moves',(α',β')) <- find_best_line (worst_val,[]) moves (α,β) killermoves
+					res <- find_best_line (worst_val,[]) moves (α,β) killermoves
 					modify' $ \ s -> s { positionHashtable = HashMap.insert position res (positionHashtable s) }
 					modify' $ \ s -> s { computationProgress = tail (computationProgress s) }
-					return (res,killer_moves',(α',β'))
+					return res
 
 		where
 
@@ -601,8 +601,8 @@ do_search maxdepth depth position current_line (α,β) = do
 			White -> (α,(>),max)
 			Black -> (β,(<),min)
 
-		find_best_line :: (Rating,[Move]) -> [Move] -> (Rating,Rating) -> KillerMoves -> SearchMonad ((Rating,[Move]),KillerMoves,(Rating,Rating))
-		find_best_line best@(best_val,best_line) (move:moves) (α,β) killermoves = do
+		find_best_line :: (Rating,[Move]) -> [Move] -> (Rating,Rating) -> SearchMonad ((Rating,Line),AlphaBetaWindow)
+		find_best_line best@(best_val,best_line) (move:moves) (α,β) = do
 			let
 				current_line' = current_line ++ [move]
 				depth' = depth + 1
@@ -659,16 +659,13 @@ do_search maxdepth depth position current_line (α,β) = do
 			case β' <= α' of
 				False -> case moves of
 					[] -> do
-						debug_here depth ("find_best_line [] returned " ++ show best) current_line (α,β)
 						return (best,killermoves',(α',β'))
 					_  -> find_best_line best' moves (α',β') killermoves'
 				True -> do
 					case positionColourToMove position of
 						White -> do
-							debug_here depth' "beta CUTOFF: " current_line' (α,β)
 							modify' $ \ s -> s { βCutoffs = βCutoffs s + 1 }
 						Black -> do
-							debug_here depth' "alpha CUTOFF: " current_line' (α,β)
 							modify' $ \ s -> s { αCutoffs = αCutoffs s + 1 }
 					killermoves'' <- case move `elem` killermoves of
 						True -> do
