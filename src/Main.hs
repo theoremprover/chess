@@ -1,6 +1,10 @@
 {-# LANGUAGE TupleSections,TypeSynonymInstances,FlexibleInstances,ScopedTypeVariables,RecordWildCards,FlexibleContexts,UnicodeSyntax,DeriveGeneric #-}
 
--- Profling: ghc -prof -fprof-auto -O2 --make Main.hs
+{- Profling:
+ghc -fforce-recomp -prof -fprof-auto -O2 --make Main.hs
+Main.exe +RTS -h -p
+hp2ps -c Main.hp
+-}
 
 module Main where
 
@@ -466,11 +470,11 @@ runTestSuite depth = do
 	case res of
 		Left err -> error $ show err
 		Right tests -> do
-			res <- forM [tests!!2]{-tests-} $ \ (name,pos,best_moves) -> do
+			res <- forM tests $ \ (name,pos,best_moves) -> do
 				putStrConsoleLn $ printf "\n###############################################"
 				putStrConsoleLn $ printf "# Test %s\n" name
 				showPos pos
-				(_,bm:_) <- evalStateT (iterative_deepening depth pos) initialSearchState
+				(_,bm:_) <- evalStateT (single_search depth pos) initialSearchState
 				putStrConsoleLn $ printf "Found    best line  %s" (showMove pos bm)
 				putStrConsoleLn $ printf "Expected best moves %s" (showMovesPretty pos best_moves)
 				verdict <- case bm `elem` best_moves of
@@ -516,9 +520,11 @@ data SearchState = SearchState {
 	killerMoveHits      :: Int,
 	memoizationHits     :: Int,
 	memoizationMisses   :: Int,
-	positionHashtable   :: HashMap.HashMap Position (Rating,[Move]) }
+	positionHashtable   :: HashMap.HashMap Position (Rating,[Move]),
+	killerMoves         :: IntMap [Move],
+	principalVariation  :: [Move] }
 	deriving (Show)
-initialSearchState = SearchState False 0 0 0 0 0 0 0 [] 0.0 0 0 [] 0 0 0 HashMap.empty
+initialSearchState = SearchState False 0 0 0 0 0 0 0 [] 0.0 0 0 [] 0 0 0 HashMap.empty IntMap.empty []
 
 showSearchState s = printf "Tot. %i Nodes, %i Leaves, %i Evals, bestLineUpdates=%i, alpha/beta-Cutoffs=%i/%i"
 	(nodesProcessed s) (leavesProcessed s) (evaluationsDone s) (bestLineUpdates s) (αCutoffs s) (βCutoffs s)
@@ -555,30 +561,12 @@ iterative_deepening maxdepth position = do
 				False -> iter (m_depth+2) αβ' best_line
 		
 
-debug_here depth str current_line αβ = do
-	s <- get
-	when (debugMode s) $ do
-		input <- do
-			putStrConsoleLn $ "\n========== " ++ str
-			putStrConsoleLn $ printf "Depth=%i, Best Rating=%+.2f" depth (bestVal s)
-			putStrConsoleLn $ "Best Line: " ++ showLine (bestLine s)
-			putStrConsoleLn $ "Computation Progress: " ++ show (computationProgress s)
-			putStrConsoleLn $ "Current Line: " ++ showLine current_line
-			putStrConsoleLn $ "(alpha,beta) = " ++ show αβ
-			putStrConsoleLn $ printf "alphaCutoffs = %i, betaCutoffs = %i" (αCutoffs s) (βCutoffs s)
-			putStrConsoleLn $ "============================"
-			putStrConsoleLn "Press Enter or 'd0'"
-			liftIO getLine
-		case input of
-			"d0" -> modify' $ \ s -> s { debugMode = False }
-			_ -> return ()
+numKillerMovesPerPly = 3
 
-type KillerMoves = [Move]
+type AlphaBetaWindow = (Rating,Rating)
 
-numKillerMoves = 5
-
-do_search :: Depth -> Depth -> Position -> [Move] -> (Rating,Rating) -> KillerMoves -> Maybe [Move] -> SearchMonad ((Rating,[Move]),KillerMoves,(Rating,Rating))
-do_search maxdepth depth position current_line (α,β) killermoves mb_principal_var = do
+do_search :: Depth -> Depth -> Position -> [Move] -> AlphaBetaWindow -> Maybe [Move] -> SearchMonad ((Rating,[Move]),AlphaBetaWindow)
+do_search maxdepth depth position current_line (α,β) = do
 --	putStrConsoleLn $ printf "----- CURRENT LINE: %s " (showLine current_line)
 	case moveGenerator position of
 		Left  _  -> return ((evalPosition position,[]),killermoves,(α,β))
@@ -598,9 +586,7 @@ do_search maxdepth depth position current_line (α,β) killermoves mb_principal_
 					modify' $ \ s -> s { computationProgress = (0,length moves) : computationProgress s }
 					(res,killer_moves',(α',β')) <- find_best_line (worst_val,[]) moves (α,β) killermoves
 					modify' $ \ s -> s { positionHashtable = HashMap.insert position res (positionHashtable s) }
-					debug_here depth ("find_best_line returned " ++ show res) current_line (α',β')
 					modify' $ \ s -> s { computationProgress = tail (computationProgress s) }
-					debug_here depth "AFTER FIND_BEST_LINE" current_line (α',β')
 					return (res,killer_moves',(α',β'))
 
 		where
