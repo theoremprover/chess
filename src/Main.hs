@@ -536,6 +536,7 @@ single_search depth position = do
 	(res,_,_) <- do_search depth 0 position [] (-mAX_RATING,mAX_RATING) [] Nothing
 	return res
 
+{-
 iterative_deepening :: Depth -> Position -> SearchMonad (Rating,[Move])
 iterative_deepening maxdepth position = do
 	((rating,best_line),killermoves,(α,β)) <- do_search 4 0 position [] (-mAX_RATING,mAX_RATING) [] Nothing
@@ -557,7 +558,7 @@ iterative_deepening maxdepth position = do
 			_  -> case m_depth >= maxdepth of
 				True  -> return res
 				False -> iter (m_depth+2) αβ' best_line
-		
+-}	
 
 numKillerMovesPerPly = 3
 
@@ -578,15 +579,17 @@ do_search maxdepth depth position current_line (α,β) = do
 				Nothing -> do
 					modify' $ \ s -> s { memoizationMisses = memoizationMisses s + 1 }
 					let
-						principal_moves = take 1 $ drop depth $ principalVariation s
-						killer_moves = IntMap.findWithDefault [] depth (killerMoves s)
+						SearchState{..} <- get
+						principal_moves = take 1 $ drop depth $ principalVariation
+						killer_moves = IntMap.findWithDefault [] depth killerMoves
 						presorted_moves = reverse $ sortBy (comparing move_sort_val) unsorted_moves
 						moves = (principal_moves ++ killer_moves) `intersect` presorted_moves ++
 							(presorted_moves \\ principal_moves) \\ killer_moves
 					modify' $ \ s -> s { computationProgress = (0,length moves) : computationProgress s }
 					res <- find_best_line (worst_val,[]) moves (α,β) killermoves
-					modify' $ \ s -> s { positionHashtable = HashMap.insert position res (positionHashtable s) }
-					modify' $ \ s -> s { computationProgress = tail (computationProgress s) }
+					modify' $ \ s -> s {
+						positionHashtable = HashMap.insert position res (positionHashtable s),
+						computationProgress = tail (computationProgress s) }
 					return res
 
 		where
@@ -597,45 +600,44 @@ do_search maxdepth depth position current_line (α,β) = do
 			where
 			piecetypeval_at coors = let Just (_,piecetype) = (positionBoard position)!coors in 1 + index (Ù,Þ) piecetype
 
+{-
 		(worst_val,isBetterThan,accum_fun) = case positionColourToMove position of
 			White -> (α,(>),max)
 			Black -> (β,(<),min)
+-}
 
 		find_best_line :: (Rating,[Move]) -> [Move] -> (Rating,Rating) -> SearchMonad ((Rating,Line),AlphaBetaWindow)
 		find_best_line best@(best_val,best_line) (move:moves) (α,β) = do
 			let
+				position' = doMove position move
 				current_line' = current_line ++ [move]
 				depth' = depth + 1
-				position' = doMove position move
-			debug_here depth' ("CURRENT MOVE: " ++ showMove_FromTo move) current_line' (α,β)
 			modify' $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
 
-			((this_val,this_subline),sub_killer_moves) <- case depth' < maxdepth of
-				True -> do
-					(res,sub_killer_moves,_) <- do_search maxdepth depth' position' current_line' (α,β) killermoves mb_principal_var
-					return (res,sub_killer_moves)
+			((val,subline),(α',β')) <- case depth' < maxdepth of
+				True -> do_search maxdepth depth' position' current_line' (α,β)
 				False -> do
 					modify' $ \ s -> s {
 						leavesProcessed = leavesProcessed s + 1,
 						nodesProcessed  = nodesProcessed  s + 1,
 						evaluationsDone = evaluationsDone s + 1 }
 					last_output_secs <- gets lastStateOutputTime
-					TOD current_secs _ <- liftIO $ getClockTime
+					TOD current_secs _ <- liftIO getClockTime
 					when (current_secs - last_output_secs >=1) $ do
-						s <- get
-						current_cpu_time <- liftIO $ getCPUTime
-						let nodes_per_sec = div (1000000 * fromIntegral $ nodesProcessed s - lastNodesProcessed s)
-							(max (div (current_cpu_time - lastCPUTime s) 1000000) 1)
+						SearchState{..} <- get
+						current_cpu_time <- liftIO getCPUTime
+						let nodes_per_sec = div (1000000 * fromIntegral $ nodesProcessed - lastNodesProcessed)
+							(max (div (current_cpu_time - lastCPUTime) 1000000) 1)
 						putStrConsole $ printf "[%3.0f%%] %4i Nodes/s Cuts:%i/%i  KillerHits:%i  Memo(Pos:%i Hits:%i Miss:%i)    \r"
-							(100.0 * comp_progress [] (reverse $ computationProgress s))
-							nodes_per_sec
-							(αCutoffs s) (βCutoffs s)
-							(killerMoveHits s) (HashMap.size (positionHashtable s)) (memoizationHits s) (memoizationMisses s)
+							(100.0 * comp_progress [] (reverse computationProgress))
+							nodes_per_sec αCutoffs βCutoffs killerMoveHits (HashMap.size positionHashtable)
+							memoizationHits memoizationMisses
 						modify' $ \ s -> s {
 							lastStateOutputTime = current_secs,
 							lastNodesProcessed = nodesProcessed s,
 							lastCPUTime = current_cpu_time }
-					return $ ((evalPosition position',[]),[])			
+					let neg_val = if positionColourToMove position == White then 
+					return $ ((neg_val $ evalPosition position',[]),(α,β))			
 
 			let killermoves' = take numKillerMoves $ union sub_killer_moves killermoves
 
