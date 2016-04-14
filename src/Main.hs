@@ -600,11 +600,9 @@ do_search maxdepth depth position current_line (α,β) = do
 			where
 			piecetypeval_at coors = let Just (_,piecetype) = (positionBoard position)!coors in 1 + index (Ù,Þ) piecetype
 
-{-
-		(worst_val,isBetterThan,accum_fun) = case positionColourToMove position of
-			White -> (α,(>),max)
-			Black -> (β,(<),min)
--}
+		(worst_val,isBetterThan) = case positionColourToMove position of
+			White -> (α,(>))
+			Black -> (β,(<))
 
 		find_best_line :: (Rating,[Move]) -> [Move] -> (Rating,Rating) -> SearchMonad ((Rating,Line),AlphaBetaWindow)
 		find_best_line best@(best_val,best_line) (move:moves) (α,β) = do
@@ -636,10 +634,7 @@ do_search maxdepth depth position current_line (α,β) = do
 							lastStateOutputTime = current_secs,
 							lastNodesProcessed = nodesProcessed s,
 							lastCPUTime = current_cpu_time }
-					let neg_val = if positionColourToMove position == White then 
-					return $ ((neg_val $ evalPosition position',[]),(α,β))			
-
-			let killermoves' = take numKillerMoves $ union sub_killer_moves killermoves
+					return ((evalPosition position',[]),(α,β))			
 
 			best'@(best_val',_) <- case this_val `isBetterThan` best_val of
 				True -> do
@@ -650,12 +645,6 @@ do_search maxdepth depth position current_line (α,β) = do
 					return (this_val,move:this_subline)
 				False -> return best
 
-			debug_here depth' (printf "AFTER COMPARISON: BEST was %+.2f, THIS is %+.2f" best_val this_val) current_line' (α,β)
-
-			let (α',β') = case positionColourToMove position of
-				White -> ( accum_fun best_val α, β                    )
-				Black -> ( α                   , accum_fun best_val β )
-
 			modify' $ \ s -> s { computationProgress = let ((i,n):ps) = computationProgress s in (i+1,n):ps }
 
 			case β' <= α' of
@@ -665,10 +654,8 @@ do_search maxdepth depth position current_line (α,β) = do
 					_  -> find_best_line best' moves (α',β') killermoves'
 				True -> do
 					case positionColourToMove position of
-						White -> do
-							modify' $ \ s -> s { βCutoffs = βCutoffs s + 1 }
-						Black -> do
-							modify' $ \ s -> s { αCutoffs = αCutoffs s + 1 }
+						White -> modify' $ \ s -> s { βCutoffs = βCutoffs s + 1 }
+						Black -> modify' $ \ s -> s { αCutoffs = αCutoffs s + 1 }
 					killermoves'' <- case move `elem` killermoves of
 						True -> do
 							modify' $ \ s -> s { killerMoveHits = killerMoveHits s + 1 }
