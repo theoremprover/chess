@@ -509,7 +509,6 @@ data SearchState = SearchState {
 	lastNodesProcessed  :: Int,
 	leavesProcessed     :: Int,
 	evaluationsDone     :: Int,
-	bestLineUpdates     :: Int,
 	lastStateOutputTime :: Integer,
 	lastCPUTime         :: Integer,
 	αCutoffs            :: Int,
@@ -522,7 +521,7 @@ data SearchState = SearchState {
 	killerMoves         :: IntMap [Move],
 	principalVariation  :: Line }
 	deriving (Show)
-initialSearchState = SearchState False 0 0 0 0 0 0 0 0 0 [] 0 0 0 HashMap.empty IntMap.empty []
+initialSearchState = SearchState False 0 0 0 0 0 0 0 0 [] 0 0 0 HashMap.empty IntMap.empty []
 
 showSearchState s = printf "Tot. %i Nodes, %i Leaves, %i Evals, bestLineUpdates=%i, alpha/beta-Cutoffs=%i/%i"
 	(nodesProcessed s) (leavesProcessed s) (evaluationsDone s) (bestLineUpdates s) (αCutoffs s) (βCutoffs s)
@@ -565,11 +564,11 @@ numKillerMovesPerPly = 3
 type AlphaBetaWindow = (Rating,Rating)
 type Line = [Move]
 
-do_search :: Depth -> Depth -> Position -> Line -> AlphaBetaWindow -> SearchMonad ((Rating,Line),AlphaBetaWindow)
+do_search :: Depth -> Depth -> Position -> Line -> AlphaBetaWindow -> SearchMonad (Rating,Line)
 do_search maxdepth depth position current_line (α,β) = do
 --	putStrConsoleLn $ printf "----- CURRENT LINE: %s " (showLine current_line)
 	case moveGenerator position of
-		Left  _  -> return ((evalPosition position,[]),(α,β))
+		Left  _  -> return (evalPosition position,[])
 		Right unsorted_moves -> do
 			hashmap <- gets positionHashtable
 			case HashMap.lookup position hashmap of
@@ -604,7 +603,9 @@ do_search maxdepth depth position current_line (α,β) = do
 			White -> (α,(>))
 			Black -> (β,(<))
 
-		find_best_line :: (Rating,[Move]) -> [Move] -> (Rating,Rating) -> SearchMonad ((Rating,Line),AlphaBetaWindow)
+		maximizing = positionColourToMove position == White
+
+		find_best_line :: (Rating,[Move]) -> [Move] -> (Rating,Rating) -> SearchMonad (Rating,Line)
 		find_best_line best@(best_val,best_line) (move:moves) (α,β) = do
 			let
 				position' = doMove position move
@@ -612,8 +613,9 @@ do_search maxdepth depth position current_line (α,β) = do
 				depth' = depth + 1
 			modify' $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
 
-			((val,subline),(α',β')) <- case depth' < maxdepth of
-				True -> do_search maxdepth depth' position' current_line' (α,β)
+			(val,subline) <- case depth' < maxdepth of
+				True -> do_search maxdepth depth' position' current_line' $
+					if maximizing then (best_val,β) else (α,best_val)
 				False -> do
 					modify' $ \ s -> s {
 						leavesProcessed = leavesProcessed s + 1,
@@ -634,15 +636,16 @@ do_search maxdepth depth position current_line (α,β) = do
 							lastStateOutputTime = current_secs,
 							lastNodesProcessed = nodesProcessed s,
 							lastCPUTime = current_cpu_time }
-					return ((evalPosition position',[]),(α,β))			
+					return (evalPosition position',[])		
 
-			best'@(best_val',_) <- case this_val `isBetterThan` best_val of
-				True -> do
-					modify' $ \ s -> s {
-						bestLine = current_line' ++ this_subline,
-						bestVal = this_val,
-						bestLineUpdates = bestLineUpdates s + 1 }
-					return (this_val,move:this_subline)
+			case maximizing && val >= β || not maximizing && val <= α of
+				True  -> case maximizing of   -- CUTOFF
+					True  -> modify' $ \ s -> s { βCutoffs = βCutoffs s + 1 }
+					False -> modify' $ \ s -> s { αCutoffs = αCutoffs s + 1 }
+				False ->
+---
+			best' <- case val `isBetterThan` best_val of
+				True  -> return (val,move:subline)
 				False -> return best
 
 			modify' $ \ s -> s { computationProgress = let ((i,n):ps) = computationProgress s in (i+1,n):ps }
