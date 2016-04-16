@@ -24,7 +24,7 @@ import Data.Char
 import Data.Ord
 import System.Time
 import qualified Data.IntMap.Strict as IntMap
-import Text.Parsec
+import Text.Parsec hiding (Line)
 import Text.Parsec.String
 import System.IO
 import System.CPUTime
@@ -443,9 +443,8 @@ loop depth pos = do
 					case line of
 						[] -> putStrConsoleLn $ printf "Value = %+2.2f, no move possible." val
 						best_move:_ -> do
-							putStrConsoleLn $ showSearchState s
-							putStrConsoleLn $ "Found best move " ++ showMove pos best_move
-							putStrConsoleLn $ "Best line: " ++ showMovesPretty pos line
+							putStrConsoleLn $ "\n\n" ++ showSearchState s
+							putStrConsoleLn $ "Found best line: " ++ showLinePretty pos line
 							do_move best_move
 				"b" -> return ()
 				"q" -> error $ "Quit."
@@ -470,12 +469,12 @@ runTestSuite depth = do
 	case res of
 		Left err -> error $ show err
 		Right tests -> do
-			res <- forM tests $ \ (name,pos,best_moves) -> do
+			res <- forM (drop 1 tests) $ \ (name,pos,best_moves) -> do
 				putStrConsoleLn $ printf "\n###############################################"
 				putStrConsoleLn $ printf "# Test %s\n" name
 				showPos pos
-				(_,bm:_) <- evalStateT (single_search depth pos) initialSearchState
-				putStrConsoleLn $ printf "Found    best line  %s" (showMove pos bm)
+				(_,best_line@(bm:_)) <- evalStateT (iterative_deepening depth pos) initialSearchState
+				putStrConsoleLn $ printf "\n\nFound    best line  %s" (showLinePretty pos best_line)
 				putStrConsoleLn $ printf "Expected best moves %s" (showMovesPretty pos best_moves)
 				verdict <- case bm `elem` best_moves of
 					False -> do
@@ -488,12 +487,16 @@ runTestSuite depth = do
 
 			forM_ res $ \ (name,pos,bm,best_moves,verdict) -> do
 				putStrConsoleLn $ printf "Test %-7s: Expected %-5s, Found %-5s => %s" name (showMove pos bm)
-					(showMovesPretty pos best_moves) (if verdict then "ok" else "FAIL")
+					(showLinePretty pos best_moves) (if verdict then "ok" else "FAIL")
 
 showMove_FromTo Move{..} = showCoors moveFrom ++ showCoors moveTo ++ maybe "" pieceStr movePromote
 
 showLine :: [Move] -> String
 showLine moves = intercalate ", " (map showMove_FromTo moves)
+
+showLinePretty :: Position -> [Move] -> String
+showLinePretty _ [] = ""
+showLinePretty pos (move:moves) = showMove pos move ++ ", " ++ showLinePretty (doMove pos move) moves
 
 readMove pos movestr = head [ move | let Right moves = moveGenerator pos, move <- moves, movestr == showMove_FromTo move ]
 
@@ -518,13 +521,13 @@ data SearchState = SearchState {
 	memoizationHits     :: Int,
 	memoizationMisses   :: Int,
 	positionHashtable   :: HashMap.HashMap Position (Rating,Line),
-	killerMoves         :: IntMap [Move],
+	killerMoves         :: IntMap.IntMap [Move],
 	principalVariation  :: Line }
 	deriving (Show)
 initialSearchState = SearchState False 0 0 0 0 0 0 0 0 [] 0 0 0 HashMap.empty IntMap.empty []
 
-showSearchState s = printf "Tot. %i Nodes, %i Leaves, %i Evals, bestLineUpdates=%i, alpha/beta-Cutoffs=%i/%i"
-	(nodesProcessed s) (leavesProcessed s) (evaluationsDone s) (bestLineUpdates s) (αCutoffs s) (βCutoffs s)
+showSearchState s = printf "Tot. %i Nodes, %i Leaves, %i Evals, alpha/beta-Cutoffs=%i/%i"
+	(nodesProcessed s) (leavesProcessed s) (evaluationsDone s) (αCutoffs s) (βCutoffs s)
 
 comp_progress _ [] = 0.0 :: Float
 comp_progress ts ((i,n):ins) = product ts * fromIntegral i / fromIntegral n + comp_progress ((1 / fromIntegral n):ts) ins
@@ -532,32 +535,36 @@ comp_progress ts ((i,n):ins) = product ts * fromIntegral i / fromIntegral n + co
 type SearchMonad a = StateT SearchState IO a
 
 single_search depth position = do
-	(res,_,_) <- do_search depth 0 position [] (-mAX_RATING,mAX_RATING) [] Nothing
-	return res
+	do_search depth 0 position [] (-mAX_RATING,mAX_RATING)
 
-{-
-iterative_deepening :: Depth -> Position -> SearchMonad (Rating,[Move])
+aspirationRadius = 0.33
+
+iterative_deepening :: Depth -> Position -> SearchMonad (Rating,Line)
 iterative_deepening maxdepth position = do
-	((rating,best_line),killermoves,(α,β)) <- do_search 4 0 position [] (-mAX_RATING,mAX_RATING) [] Nothing
-	res <- iter 6 (α,β) best_line
-	return res
+	putStrConsoleLn $ printf "\n========== iterative_deepening : maxdepth=%i" maxdepth
+	putStrConsoleLn $ printf "intial search..."
+	(rating,best_line) <- do_search 4 0 position [] (-mAX_RATING,mAX_RATING)
+	iter 6 (rating,best_line) (rating-aspirationRadius,rating+aspirationRadius)
 	where
-	iter :: Depth -> (Rating,Rating) -> [Move] -> SearchMonad (Rating,[Move])
-	iter m_depth (α,β) principal_var = do
+	iter :: Depth -> (Rating,Line) -> AlphaBetaWindow -> SearchMonad (Rating,Line)
+	iter m_depth last_res _ | m_depth > maxdepth = return last_res
+	iter m_depth (last_rating,last_best_line) (α,β) = do
 		putStrConsoleLn $ printf "\n========== iter : m_depth=%i,  maxdepth=%i" m_depth maxdepth
-		putStrConsoleLn $ printf "== alpha/beta=(%+.2f,%+.2f),  principal_var: %s\n" α β (showLine principal_var)
-		put initialSearchState
-		(res@(_,best_line),killermoves,αβ'@(α',β')) <- do_search m_depth 0 position [] (α,β) [] (Just principal_var)
-		putStrConsoleLn $ printf "\n\n Found best line %s" (showMovesPretty position best_line)
-		case best_line of
-			[] -> do
-				let αβ_new@(α_new,β_new) = (α-1.5,β+1.5)
-				putStrConsoleLn $ printf "FAIL, widening (%+.2f,%+.2f) to (%+.2f,%+.2f)\n" α β α_new β_new
-				iter m_depth αβ_new principal_var
-			_  -> case m_depth >= maxdepth of
-				True  -> return res
-				False -> iter (m_depth+2) αβ' best_line
--}	
+		putStrConsoleLn $ printf "== alpha/beta=(%+.2f,%+.2f),  principal_var: %s\n" α β (showLine last_best_line)
+		modify' $ \ s -> initialSearchState {
+			principalVariation = last_best_line,
+			killerMoves = killerMoves s,
+			debugMode   = debugMode s }
+		res@(rating,best_line) <- do_search m_depth 0 position [] (α,β)
+		putStrConsoleLn $ printf "\n\nFound %+.2f : %s" rating (showLinePretty position best_line)
+		case (rating<α,rating>β) of
+			(True,False) -> do
+				putStrConsoleLn $ printf "rating=%+.2f < α=%+.2f => FAIL LOW, expanding and re-searching...\n" rating α
+				iter m_depth res (rating-aspirationRadius,β)
+			(False,True) -> do
+				putStrConsoleLn $ printf "rating=%+.2f > β=%+.2f => FAIL HIGH, expanding and re-searching...\n" rating β
+				iter m_depth res (α,rating+aspirationRadius)
+			_ -> iter (m_depth+2) res (rating-aspirationRadius,rating+aspirationRadius)
 
 numKillerMovesPerPly = 3
 
@@ -574,18 +581,18 @@ do_search maxdepth depth position current_line (α,β) = do
 			case HashMap.lookup position hashmap of
 				Just res -> do
 					modify' $ \ s -> s { memoizationHits = memoizationHits s + 1 }
-					return (res,(α,β))
+					return res
 				Nothing -> do
 					modify' $ \ s -> s { memoizationMisses = memoizationMisses s + 1 }
+					s <- get
 					let
-						SearchState{..} <- get
-						principal_moves = take 1 $ drop depth $ principalVariation
-						killer_moves = IntMap.findWithDefault [] depth killerMoves
+						principal_moves = take 1 $ drop depth (principalVariation s)
+						killer_moves = IntMap.findWithDefault [] depth (killerMoves s)
 						presorted_moves = reverse $ sortBy (comparing move_sort_val) unsorted_moves
-						moves = (principal_moves ++ killer_moves) `intersect` presorted_moves ++
-							(presorted_moves \\ principal_moves) \\ killer_moves
+						moves = ((principal_moves ++ killer_moves) `intersect` presorted_moves) ++
+							((presorted_moves \\ principal_moves) \\ killer_moves)
 					modify' $ \ s -> s { computationProgress = (0,length moves) : computationProgress s }
-					res <- find_best_line (worst_val,[]) moves (α,β) killermoves
+					res <- find_best_line (worst_val,[]) moves
 					modify' $ \ s -> s {
 						positionHashtable = HashMap.insert position res (positionHashtable s),
 						computationProgress = tail (computationProgress s) }
@@ -605,8 +612,9 @@ do_search maxdepth depth position current_line (α,β) = do
 
 		maximizing = positionColourToMove position == White
 
-		find_best_line :: (Rating,[Move]) -> [Move] -> (Rating,Rating) -> SearchMonad (Rating,Line)
-		find_best_line best@(best_val,best_line) (move:moves) (α,β) = do
+		find_best_line :: (Rating,[Move]) -> [Move] -> SearchMonad (Rating,Line)
+		find_best_line best [] = return best
+		find_best_line best@(best_val,best_line) (move:moves) = do
 			let
 				position' = doMove position move
 				current_line' = current_line ++ [move]
@@ -614,8 +622,22 @@ do_search maxdepth depth position current_line (α,β) = do
 			modify' $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
 
 			(val,subline) <- case depth' < maxdepth of
-				True -> do_search maxdepth depth' position' current_line' $
-					if maximizing then (best_val,β) else (α,best_val)
+				True -> do
+					let
+						full_αβ = if maximizing then (best_val,β) else (α,best_val)
+					do_search maxdepth depth' position' current_line' full_αβ
+{-
+					s <- get
+					let
+						(α_sub,β_sub) = case current_line' `isPrefixOf` (principalVariation s) of
+							True  -> full_αβ
+							False -> if maximizing then (α,α+0.000001) else (β-0.000001,β)
+					res@(val,_) <- do_search maxdepth depth' position' current_line' (α_sub,β_sub)
+					case (maximizing && val > α) || (not maximizing && val < β) of
+						True  -> do
+							do_search maxdepth depth' position' current_line' full_αβ
+						False -> return res
+-}
 				False -> do
 					modify' $ \ s -> s {
 						leavesProcessed = leavesProcessed s + 1,
@@ -634,34 +656,25 @@ do_search maxdepth depth position current_line (α,β) = do
 							memoizationHits memoizationMisses
 						modify' $ \ s -> s {
 							lastStateOutputTime = current_secs,
-							lastNodesProcessed = nodesProcessed s,
+							lastNodesProcessed = nodesProcessed,
 							lastCPUTime = current_cpu_time }
-					return (evalPosition position',[])		
-
-			case maximizing && val >= β || not maximizing && val <= α of
-				True  -> case maximizing of   -- CUTOFF
-					True  -> modify' $ \ s -> s { βCutoffs = βCutoffs s + 1 }
-					False -> modify' $ \ s -> s { αCutoffs = αCutoffs s + 1 }
-				False ->
----
-			best' <- case val `isBetterThan` best_val of
-				True  -> return (val,move:subline)
-				False -> return best
+					return (evalPosition position',current_line')		
 
 			modify' $ \ s -> s { computationProgress = let ((i,n):ps) = computationProgress s in (i+1,n):ps }
 
-			case β' <= α' of
-				False -> case moves of
-					[] -> do
-						return (best,killermoves',(α',β'))
-					_  -> find_best_line best' moves (α',β') killermoves'
-				True -> do
-					case positionColourToMove position of
-						White -> modify' $ \ s -> s { βCutoffs = βCutoffs s + 1 }
-						Black -> modify' $ \ s -> s { αCutoffs = αCutoffs s + 1 }
-					killermoves'' <- case move `elem` killermoves of
-						True -> do
-							modify' $ \ s -> s { killerMoveHits = killerMoveHits s + 1 }
-							return killermoves'
-						False -> return $ take numKillerMoves (move : killermoves')
-					return (best,killermoves'',(α',β'))
+			best' <- case val `isBetterThan` best_val of
+				True  -> return (val,subline)
+				False -> return best
+
+			case (maximizing && val >= β) || (not maximizing && val <= α) of
+				True  -> do  -- CUTOFF
+					modify' $ \ s -> case maximizing of
+						True  -> s { βCutoffs = βCutoffs s + 1 }
+						False -> s { αCutoffs = αCutoffs s + 1 }
+					modify' $ \ s -> case move `elem` (IntMap.findWithDefault [] depth (killerMoves s)) of
+						True  -> s { killerMoveHits = killerMoveHits s + 1 }
+						False -> s { killerMoves = IntMap.insertWith
+							(\ new old -> take numKillerMovesPerPly $ new ++ old)
+							depth [move] (killerMoves s) }
+					return best'
+				False -> find_best_line best' moves
