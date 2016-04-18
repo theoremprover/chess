@@ -643,19 +643,14 @@ do_search maxdepth depth position current_line (α,β) pv_node = do
 				True -> do
 					let
 						full_αβ = if maximizing then (best_val,β) else (α,best_val)
-					do_search maxdepth depth' position' current_line' full_αβ pv_node
-{-
-					s <- get
-					let
-						(α_sub,β_sub) = case current_line' `isPrefixOf` (principalVariation s) of
-							True  -> full_αβ
-							False -> if maximizing then (α,α+0.000001) else (β-0.000001,β)
-					res@(val,_) <- do_search maxdepth depth' position' current_line' (α_sub,β_sub)
-					case (maximizing && val > α) || (not maximizing && val < β) of
-						True  -> do
-							do_search maxdepth depth' position' current_line' full_αβ
-						False -> return res
--}
+						null_window = if maximizing then (α,α+0.000001) else (β-0.000001,β)
+					case pv_node of
+						True  -> do_search maxdepth depth' position' current_line' full_αβ pv_node
+						False -> do
+							res'@(val',_) <- do_search maxdepth depth' position' current_line' null_window pv_node
+							case α < val' && val' < β of
+								False -> return res'
+								True  -> do_search maxdepth depth' position' current_line' full_αβ pv_node
 				False -> do
 					modify' $ \ s -> s {
 						leavesProcessed = leavesProcessed s + 1,
