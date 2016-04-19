@@ -201,8 +201,13 @@ random64 = [
    0xCF3145DE0ADD4289,0xD0E4427A5514FB72,0x77C621CC9FB3A483,0x67A34DAC4356550B,
    0xF8D626AAAF278509 ] :: [Word64]
 
-key position = piece `xor` castle `xor` enpassant `xor` turn where
-	piece = random64!!(64*piecetype+8*row+file)
-	castle = 768+
-	enpassant = 772 +
-	turn = 780 +
+key Position{..} = foldl1 xor $ map (random64!!)
+	[ 64*(index (Ù,Þ) piecetype * 2 + if col==Black then 0 else 1) + 8*row + file) |
+		((file,row),Just (col,piecetype) <- assocs positionBoard ] ++
+	map (768+) (
+		(if positionCanCastleKingSide  White then [0] else []) ++
+		(if positionCanCastleQueenSide White then [1] else []) ++
+		(if positionCanCastleKingSide  Black then [2] else []) ++
+		(if positionCanCastleQueenSide Black then [3] else []) ) ++
+	maybe [] (\ (file,_) -> [772+file]) positionEnPassantSquare ++
+	(if positionColourToMove == White then [780] else [])
