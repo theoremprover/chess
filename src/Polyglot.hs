@@ -1,5 +1,7 @@
 module Polyglot where
 
+import Core
+
 import Data.Word
 import Data.Bits
 
@@ -205,9 +207,22 @@ key Position{..} = foldl1 xor $ map (random64!!)
 	[ 64*(index (Ù,Þ) piecetype * 2 + if col==Black then 0 else 1) + 8*row + file) |
 		((file,row),Just (col,piecetype) <- assocs positionBoard ] ++
 	map (768+) (
-		(if positionCanCastleKingSide  White then [0] else []) ++
-		(if positionCanCastleQueenSide White then [1] else []) ++
-		(if positionCanCastleKingSide  Black then [2] else []) ++
-		(if positionCanCastleQueenSide Black then [3] else []) ) ++
+		(if White `elem` positionCanCastleKingSide  then [0] else []) ++
+		(if White `elem` positionCanCastleQueenSide then [1] else []) ++
+		(if Black `elem` positionCanCastleKingSide  then [2] else []) ++
+		(if Black `elem` positionCanCastleQueenSide then [3] else []) ) ++
 	maybe [] (\ (file,_) -> [772+file]) positionEnPassantSquare ++
 	(if positionColourToMove == White then [780] else [])
+
+{-
+toPolyglotHash pos = 
+--fromPolyglotHash hash =
+
+ht = do
+	putStrLn "key == toPolyglotHash pos: " ++ show (key == toPolyglotHash pos)
+--	putStrLn "fromPolyglotHash key == pos" ++ show (fromPolyglotHash key == pos)
+	where
+	Right pos = parse fen_p "" "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPPKPPP/RNBQ1BNR b kq - 0 3"
+	key = 0x652a607ca3f242c1
+-}
+
