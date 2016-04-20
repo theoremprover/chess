@@ -84,11 +84,11 @@ loop depth pos = do
 				"b" -> return ()
 				"q" -> error $ "Quit."
 				"t" -> runTestSuite depth
-				"r" -> loop depth intialPosition
+				"r" -> loop depth initialPosition
 				"book" -> do
-					proposals <- liftIO $ openingBookProposals pos
-					forM_ () $ \ (move,rating) -> do
-						putStrConsoleLn $ printf "  -> %s ( %+2.2f )" (showMove pos mov) rating
+					book <- openingBook
+					forM_ (openingBookProposals book pos) $ \ (move,rating) -> do
+						putStrConsoleLn $ printf "  -> %s ( %+2.2f )" (showMove pos move) rating
 				depthstr | length depthstr > 0 && all isDigit depthstr -> do
 					let (depth',""):_ = (reads :: ReadS Int) depthstr
 					putStrConsoleLn $ "Setting depth = " ++ show depth'

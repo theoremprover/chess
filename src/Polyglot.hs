@@ -1,4 +1,4 @@
-{-# LANGUAGE UnicodeSyntax #-}
+{-# LANGUAGE UnicodeSyntax,RecordWildCards #-}
 
 module Polyglot where
 
@@ -8,8 +8,8 @@ import Data.Word
 import Data.Bits
 import qualified Data.HashMap.Strict as HashMap
 import qualified Data.ByteString as BS
-import Text.Parsec hiding (Line)
-import qualified Text.Parsec.ByteString
+import Data.Attoparsec.ByteString
+import Data.Attoparsec.Binary
 
 random64 = [
    0x9D39247E33776D41,0x2AF7398005AAA5C7,0x44DB015024623547,0x9C15F73E62A76AE2,
@@ -209,33 +209,53 @@ random64 = [
    0xCF3145DE0ADD4289,0xD0E4427A5514FB72,0x77C621CC9FB3A483,0x67A34DAC4356550B,
    0xF8D626AAAF278509 ] :: [Word64]
 
-key Position{..} = foldl1 xor $ map (random64!!)
-	[ 64*(index (Ù,Þ) piecetype * 2 + if col==Black then 0 else 1) + 8*row + file) |
-		((file,row),Just (col,piecetype) <- assocs positionBoard ] ++
-	map (768+) (
+pos2key :: Position -> Word64
+pos2key Position{..} = ((piece `xor` castle) `xor` enpassant) `xor` turn
+	where
+	piece = foldl 0 xor $ map (random64!!)
+		[ 64*(index (Ã™,Ãž) piecetype * 2 + if col==Black then 0 else 1) + 8*row + file |
+			((file,row),Just (col,piecetype)) <- assocs positionBoard ]
+	castle = foldl 0 xor $ map (random64!!) $ map (768+) $
 		(if White `elem` positionCanCastleKingSide  then [0] else []) ++
 		(if White `elem` positionCanCastleQueenSide then [1] else []) ++
 		(if Black `elem` positionCanCastleKingSide  then [2] else []) ++
-		(if Black `elem` positionCanCastleQueenSide then [3] else []) ) ++
-	maybe [] (\ (file,_) -> [772+file]) positionEnPassantSquare ++
-	(if positionColourToMove == White then [780] else [])
+		(if Black `elem` positionCanCastleQueenSide then [3] else [])
+	enpassant = foldl 0 xor $ map (random64!!) $
+		maybe [] (\ (file,_) -> [772+file]) positionEnPassantSquare
+	turn = foldl 0 xor $ map (random64!!) $
+		if positionColourToMove == White then [780] else []
 
-type OpeningBook = HashMap.HashMap Position [(Move,Word16)]
+type OpeningBook = HashMap.HashMap Word64 [(Coors,Coors,Maybe PieceType,Word16)]
 
-word8_p = anyToken
-word16_p = 
+polyglot_move_p = do
+		keyb    <- anyWord64be
+		moveb   <- anyWord16be
+		weightb <- anyWord16be
+		learnb  <- anyWord32be
+		let
+			bitfield3 i = fromIntegral $ 7 `xor` (shiftR moveb i)
+			(from,to) = ((bitfield3 6,bitfield3 9),(bitfield3 0,bitfield3 3))
+			mb_prom = case bitfield3 12 of
+				0 -> Nothing
+				i -> Just $ toEnum (i-1)
+		return (keyb,[(from,to,mb_prom,weightb)])
 
-polyglot_book_p = many1 $ do
-	
-	return l
+polyglot_book_p :: Parser OpeningBook
+polyglot_book_p = do
+	l <- many' polyglot_move_p
+	return $ HashMap.fromListWith (++) l
 
 openingBook = do
-	Right l <- Text.Parsec.ByteString.parseFromFile polyglot_book_p $ "opening_book/Stockfish Book/book.bin"
-	return $ HashMap.fromList l
+	bs <- BS.readFile "../opening_book/Stockfish Book/book.bin"
+	case eitherResult $ parse polyglot_book_p bs of
+		Left errmsg -> error errmsg
+		Right book  -> return book
 
-openingBookProposals pos = do
-	book <- openingBook
-	return $ HashMap.lookup pos
+openingBookProposals book pos@Position{..} = map to_move $ HashMap.lookupDefault [] (pos2key pos) book
+	where
+	Right moves = moveGenerator pos
+	to_move (from,to,mb_prom,weight) = (head [ move | move@Move{..} <- moves,
+		moveFrom == from, moveTo == to, mb_prom == movePromote ],weight)
 
 {-
 toPolyglotHash pos = 
