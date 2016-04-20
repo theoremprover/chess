@@ -1,30 +1,22 @@
-module Search where
+{-# LANGUAGE RecordWildCards,UnicodeSyntax #-}
+
+module Search (
+	module Control.Monad.State.Strict,
+	module Search
+	) where
+
+import System.Time
+import Control.Monad.State.Strict
+import qualified Data.HashMap.Strict as HashMap (insert,HashMap,empty,lookup,size) 
+import qualified Data.IntMap.Strict as IntMap
+import Data.List
+import Data.Ord
+import Text.Printf
+import System.CPUTime
 
 import Core
 import View
 
-data SearchState = SearchState {
-	debugMode           :: Bool,
-	nodesProcessed      :: Int,
-	lastNodesProcessed  :: Int,
-	leavesProcessed     :: Int,
-	evaluationsDone     :: Int,
-	lastStateOutputTime :: Integer,
-	lastCPUTime         :: Integer,
-	αCutoffs            :: Int,
-	βCutoffs            :: Int,
-	computationProgress :: [(Int,Int)],
-	killerMoveHits      :: Int,
-	memoizationHits     :: Int,
-	memoizationMisses   :: Int,
-	positionHashtable   :: HashMap.HashMap Position (Rating,Line),
-	killerMoves         :: IntMap.IntMap [Move],
-	principalVariation  :: Line,
-	prevPositionHashtable :: Maybe (HashMap.HashMap Position (Rating,Line)) }
-	deriving (Show)
-initialSearchState = SearchState False 0 0 0 0 0 0 0 0 [] 0 0 0 HashMap.empty IntMap.empty [] Nothing
-
-type SearchMonad a = StateT SearchState IO a
 
 single_search depth position = do
 	do_search depth 0 position [] (-mAX_RATING,mAX_RATING) True
@@ -68,7 +60,6 @@ numKillerMovesPerPly = 3
 memoizationPlies = [1,2,3,4,5]
 
 type AlphaBetaWindow = (Rating,Rating)
-type Line = [Move]
 
 do_search :: Depth -> Depth -> Position -> Line -> AlphaBetaWindow -> Bool -> SearchMonad (Rating,Line)
 do_search maxdepth depth position current_line (α,β) pv_node = do

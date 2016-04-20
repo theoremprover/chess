@@ -1,5 +1,23 @@
 {-# LANGUAGE TupleSections,TypeSynonymInstances,FlexibleInstances,ScopedTypeVariables,RecordWildCards,FlexibleContexts,UnicodeSyntax,DeriveGeneric #-}
 
+module Core (
+	module Data.Array,
+	module Core
+	) where
+
+import GHC.Generics (Generic)
+import Data.Hashable
+import qualified Data.HashMap.Strict as HashMap (insert,HashMap,empty,lookup,size) 
+import Data.Array
+import Data.Maybe
+import Data.List
+import Control.Monad
+import Data.Tuple
+import Data.NumInstances
+import qualified Data.IntMap.Strict as IntMap
+import Control.Monad.State.Strict
+
+
 type File = Int
 type Rank = Int
 type Coors = (File,Rank)
@@ -192,4 +210,29 @@ kings_coors Position{..} = head $ [ coors | (coors,Just (col,Þ)) <- assocs posi
 -- would the king of the player to move in pos be in check after the move
 king_no_check pos move = no_check pos' (kings_coors pos') where
 	pos' = (doMove pos move) { positionColourToMove = positionColourToMove pos }
+
+type Line = [Move]
+
+data SearchState = SearchState {
+	debugMode           :: Bool,
+	nodesProcessed      :: Int,
+	lastNodesProcessed  :: Int,
+	leavesProcessed     :: Int,
+	evaluationsDone     :: Int,
+	lastStateOutputTime :: Integer,
+	lastCPUTime         :: Integer,
+	αCutoffs            :: Int,
+	βCutoffs            :: Int,
+	computationProgress :: [(Int,Int)],
+	killerMoveHits      :: Int,
+	memoizationHits     :: Int,
+	memoizationMisses   :: Int,
+	positionHashtable   :: HashMap.HashMap Position (Rating,Line),
+	killerMoves         :: IntMap.IntMap [Move],
+	principalVariation  :: Line,
+	prevPositionHashtable :: Maybe (HashMap.HashMap Position (Rating,Line)) }
+	deriving (Show)
+initialSearchState = SearchState False 0 0 0 0 0 0 0 0 [] 0 0 0 HashMap.empty IntMap.empty [] Nothing
+
+type SearchMonad a = StateT SearchState IO a
 

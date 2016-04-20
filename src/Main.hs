@@ -1,3 +1,4 @@
+{-# LANGUAGE UnicodeSyntax #-}
 
 {- Compiling:
 ghc -O2 -rtsopts -fforce-recomp --make Main.hs
@@ -12,29 +13,14 @@ hp2ps -c Main.hp
 
 module Main where
 
-import GHC.Generics (Generic)
-import Data.Hashable
-import qualified Data.HashMap.Strict as HashMap (insert,HashMap,empty,lookup,size) 
-
-import Data.Array
-import Data.Maybe
-import Data.List
-import Control.Monad
-import Text.Printf
-import Data.NumInstances
-import Data.Tuple
-import Control.Monad.State.Strict
-import Data.Char
-import Data.Ord
-import System.Time
-import qualified Data.IntMap.Strict as IntMap
-import Text.Parsec hiding (Line)
-import Text.Parsec.String
-import System.IO
-import System.CPUTime
-
+{-
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.UTF8 as BSU
+-}
+import Text.Parsec.String
+import Text.Printf
+import Data.Char
+import Data.List
 
 import Core
 import Search

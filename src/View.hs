@@ -1,6 +1,23 @@
-module View where
+{-# LANGUAGE RecordWildCards,UnicodeSyntax #-}
+
+module View (
+	module View
+	) where
+
+import Text.Parsec hiding (Line)
+import Text.Parsec.String
+import Data.Char
+import Data.Maybe
+import Data.List
+import Control.Monad
+import System.IO
+import System.CPUTime
+import Text.Printf
+import Data.Array
+import Control.Monad.State.Strict
 
 import Core
+
 
 fENFigureChars = [(Ù,"P"),(Ú,"N"),(Û,"B"),(Ü,"R"),(Ý,"Q"),(Þ,"K")]
 
