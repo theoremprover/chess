@@ -6,6 +6,10 @@ import Core
 
 import Data.Word
 import Data.Bits
+import qualified Data.HashMap.Strict as HashMap
+import qualified Data.ByteString as BS
+import Text.Parsec hiding (Line)
+import qualified Text.Parsec.ByteString
 
 random64 = [
    0x9D39247E33776D41,0x2AF7398005AAA5C7,0x44DB015024623547,0x9C15F73E62A76AE2,
@@ -215,6 +219,23 @@ key Position{..} = foldl1 xor $ map (random64!!)
 		(if Black `elem` positionCanCastleQueenSide then [3] else []) ) ++
 	maybe [] (\ (file,_) -> [772+file]) positionEnPassantSquare ++
 	(if positionColourToMove == White then [780] else [])
+
+type OpeningBook = HashMap.HashMap Position [(Move,Word16)]
+
+word8_p = anyToken
+word16_p = 
+
+polyglot_book_p = many1 $ do
+	
+	return l
+
+openingBook = do
+	Right l <- Text.Parsec.ByteString.parseFromFile polyglot_book_p $ "opening_book/Stockfish Book/book.bin"
+	return $ HashMap.fromList l
+
+openingBookProposals pos = do
+	book <- openingBook
+	return $ HashMap.lookup pos
 
 {-
 toPolyglotHash pos = 

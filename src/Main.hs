@@ -24,6 +24,7 @@ import Data.List
 import Core
 import Search
 import View
+import Polyglot
 
 testPosition = stringToPosition Black [
 	"çØçØóâçÜ",
@@ -68,7 +69,7 @@ loop depth pos = do
 			putStrConsole "\nEnter command:\n> "
 			s <- getLine
 			case s of
-				(c:_) | c `elem` "si" -> do
+				(c:[]) | c `elem` "si" -> do
 					let search_fun = case c of
 						's' -> single_search
 						'i' -> iterative_deepening
@@ -83,6 +84,11 @@ loop depth pos = do
 				"b" -> return ()
 				"q" -> error $ "Quit."
 				"t" -> runTestSuite depth
+				"r" -> loop depth intialPosition
+				"book" -> do
+					proposals <- liftIO $ openingBookProposals pos
+					forM_ () $ \ (move,rating) -> do
+						putStrConsoleLn $ printf "  -> %s ( %+2.2f )" (showMove pos mov) rating
 				depthstr | length depthstr > 0 && all isDigit depthstr -> do
 					let (depth',""):_ = (reads :: ReadS Int) depthstr
 					putStrConsoleLn $ "Setting depth = " ++ show depth'

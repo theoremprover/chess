@@ -194,7 +194,7 @@ evalPosition pos@Position{..} = case moveGenerator pos of
 				Û -> 3.0 + 0.10*proximity_to_centre +                         0.02*num_moves
 				Ü -> 5.0 +                                                    0.02*num_moves
 				Ý -> 9.0 + 0.05*proximity_to_centre +                         0.01*num_moves
-				Þ -> 10000.0 ) :: Rating
+				Þ -> 0.0 ) :: Rating
 			where
 			num_moves = fromIntegral (length (filter (==coors) $ map moveFrom moves))
 			pawn_targetrank = if colour==White then 8 else 1
