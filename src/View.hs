@@ -1,6 +1,7 @@
 {-# LANGUAGE RecordWildCards,UnicodeSyntax #-}
 
 module View (
+	module Text.Parsec.String,
 	module View
 	) where
 

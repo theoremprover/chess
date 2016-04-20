@@ -17,7 +17,6 @@ module Main where
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.UTF8 as BSU
 -}
-import Text.Parsec.String
 import Text.Printf
 import Data.Char
 import Data.List
