@@ -1,4 +1,4 @@
-{-# LANGUAGE UnicodeSyntax,RecordWildCards #-}
+{-# LANGUAGE UnicodeSyntax,RecordWildCards,ScopedTypeVariables #-}
 
 module Polyglot where
 
@@ -10,6 +10,8 @@ import qualified Data.HashMap.Strict as HashMap
 import qualified Data.ByteString as BS
 import Data.Attoparsec.ByteString
 import Data.Attoparsec.Binary
+
+import Text.Printf
 
 random64 = [
    0x9D39247E33776D41,0x2AF7398005AAA5C7,0x44DB015024623547,0x9C15F73E62A76AE2,
@@ -212,20 +214,36 @@ random64 = [
 pos2key :: Position -> Word64
 pos2key Position{..} = ((piece `xor` castle) `xor` enpassant) `xor` turn
 	where
-	piece = foldl 0 xor $ map (random64!!)
+	piece = foldl xor 0 $ map (random64!!)
 		[ 64*(index (Ù,Þ) piecetype * 2 + if col==Black then 0 else 1) + 8*row + file |
 			((file,row),Just (col,piecetype)) <- assocs positionBoard ]
-	castle = foldl 0 xor $ map (random64!!) $ map (768+) $
+	castle = foldl xor 0 $ map (random64!!) $ map (768+) $
 		(if White `elem` positionCanCastleKingSide  then [0] else []) ++
 		(if White `elem` positionCanCastleQueenSide then [1] else []) ++
 		(if Black `elem` positionCanCastleKingSide  then [2] else []) ++
 		(if Black `elem` positionCanCastleQueenSide then [3] else [])
-	enpassant = foldl 0 xor $ map (random64!!) $
+	enpassant = foldl xor 0 $ map (random64!!) $
 		maybe [] (\ (file,_) -> [772+file]) positionEnPassantSquare
-	turn = foldl 0 xor $ map (random64!!) $
+	turn = foldl xor 0 $ map (random64!!) $
 		if positionColourToMove == White then [780] else []
 
 type OpeningBook = HashMap.HashMap Word64 [(Coors,Coors,Maybe PieceType,Word16)]
+
+test_p :: Parser String
+test_p = do
+		keyb    <- anyWord64be
+		moveb   <- anyWord16be
+		weightb <- anyWord16be
+		learnb  <- anyWord32be
+		let
+			bitfield3 :: Int -> Int
+			bitfield3 i = fromIntegral $ 7 `xor` (shiftR moveb i)
+			(from,to) :: (Coors,Coors) = ((bitfield3 6,bitfield3 9),(bitfield3 0,bitfield3 3))
+			mb_prom :: Maybe PieceType = case bitfield3 12 of
+				0 -> Nothing
+				i -> Just $ toEnum (i-1)
+		return $ printf "(keyb,moveb,weightb,learnb)=(%lx,%lx,%lx,%lx), (from,to,mb_prom)=(%s,%s,%s)"
+			keyb moveb weightb learnb (show from) (show to) (show mb_prom)
 
 polyglot_move_p = do
 		keyb    <- anyWord64be
