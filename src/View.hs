@@ -168,6 +168,16 @@ stringToPosition col_to_move s = Position (array ((1,1),(8,8)) $
 	tofig c = Just (toEnum (div i 6),toEnum (mod i 6)) where
 		i = ord c - ord 'Ù'
 
+initialPosition = stringToPosition White [
+	"âïáòäðàñ",
+	"îßîßîßîß",
+	"ØçØçØçØç",
+	"çØçØçØçØ",
+	"ØçØçØçØç",
+	"çØçØçØçØ",
+	"ÙèÙèÙèÙè",
+	"ëÚêÝíÛéÜ" ]
+
 showMove_FromTo Move{..} = showCoors moveFrom ++ showCoors moveTo ++ maybe "" pieceStr movePromote
 
 showLine :: [Move] -> String

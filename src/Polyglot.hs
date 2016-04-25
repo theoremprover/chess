@@ -227,19 +227,39 @@ pos2key Position{..} = ((piece `xor` castle) `xor` enpassant) `xor` turn
 	turn = foldl xor 0 $ map (random64!!) $
 		if positionColourToMove == White then [780] else []
 
+pk :: Position -> IO ()
+pk Position{..} = do
+	putStrLn $ printf "piece     = %016x" piece
+	putStrLn $ printf "castle    = %016x" castle
+	putStrLn $ printf "enpassant = %016x" enpassant
+	putStrLn $ printf "turn      = %016x" turn
+	putStrLn $ printf "key = %016x" (((piece `xor` castle) `xor` enpassant) `xor` turn)
+	where
+	piece = foldl xor 0 $ map (random64!!)
+		[ 64*(index (Ù,Þ) piecetype * 2 + if col==Black then 0 else 1) + 8*row + file |
+			((file,row),Just (col,piecetype)) <- assocs positionBoard ]
+	castle = foldl xor 0 $ map (random64!!) $ map (768+) $
+		(if White `elem` positionCanCastleKingSide  then [0] else []) ++
+		(if White `elem` positionCanCastleQueenSide then [1] else []) ++
+		(if Black `elem` positionCanCastleKingSide  then [2] else []) ++
+		(if Black `elem` positionCanCastleQueenSide then [3] else [])
+	enpassant = foldl xor 0 $ map (random64!!) $
+		maybe [] (\ (file,_) -> [772+file]) positionEnPassantSquare
+	turn = foldl xor 0 $ map (random64!!) $
+		if positionColourToMove == White then [780] else []
+
 type OpeningBook = HashMap.HashMap Word64 [(Coors,Coors,Maybe PieceType,Word16)]
 
+{-
 t = do
-	f <- BS.readFile openingBookFilePath
-	let bs = BS.take 16 f
-	print $ BS.unpack bs
-	case eitherResult $ parse p_p bs of
+	f <- BS.readFile "../opening_book/Stockfish Book/test.bin"
+	let bs = f --BS.take (16*1) f
+	case parseOnly p_p bs of
 		Left errmsg -> error errmsg
-		Right ms  -> putStrLn $ ms
+		Right ms  -> putStrLn $ unlines $ ms
 
 p_p = do
-	ret <- test_p
-	endOfInput
+	ret <- many1 test_p
 	return ret
 
 test_p :: Parser String
@@ -257,7 +277,7 @@ test_p = do
 				i -> Just $ toEnum (i-1)
 		return $ printf "(keyb,moveb,weightb,learnb)=(%lx,%lx,%lx,%lx), (from,to,mb_prom)=(%s,%s,%s)"
 			keyb moveb weightb learnb (show from) (show to) (show mb_prom)
-
+-}
 polyglot_move_p = do
 	keyb    <- anyWord64be
 	moveb   <- anyWord16be
@@ -279,7 +299,7 @@ polyglot_book_p = do
 openingBookFilePath = "../opening_book/Stockfish Book/book.bin"
 openingBook = do
 	bs <- BS.readFile openingBookFilePath
-	case eitherResult $ parse polyglot_book_p bs of
+	case parseOnly polyglot_book_p bs of
 		Left errmsg -> error errmsg
 		Right book  -> return book
 
@@ -288,16 +308,3 @@ openingBookProposals book pos@Position{..} = map to_move $ HashMap.lookupDefault
 	Right moves = moveGenerator pos
 	to_move (from,to,mb_prom,weight) = (head [ move | move@Move{..} <- moves,
 		moveFrom == from, moveTo == to, mb_prom == movePromote ],weight)
-
-{-
-toPolyglotHash pos = 
---fromPolyglotHash hash =
-
-ht = do
-	putStrLn "key == toPolyglotHash pos: " ++ show (key == toPolyglotHash pos)
---	putStrLn "fromPolyglotHash key == pos" ++ show (fromPolyglotHash key == pos)
-	where
-	Right pos = parse fen_p "" "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPPKPPP/RNBQ1BNR b kq - 0 3"
-	key = 0x652a607ca3f242c1
--}
-

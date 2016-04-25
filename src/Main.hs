@@ -36,15 +36,15 @@ testPosition = stringToPosition Black [
 	"çØçØçØçØ",
 	"ÜçØçÞçØç" ]
 
-initialPosition = stringToPosition White [
-	"âïáòäðàñ",
-	"îßîßîßîß",
+tp = stringToPosition White [
+	"çØçØçØçØ",
+	"ØçØçØçØç",
+	"çØçØçØçØ",
 	"ØçØçØçØç",
 	"çØçØçØçØ",
 	"ØçØçØçØç",
 	"çØçØçØçØ",
-	"ÙèÙèÙèÙè",
-	"ëÚêÝíÛéÜ" ]
+	"ÞçØçØçØç" ]
 
 main = do
 --	writeFile "test.txt" ""
@@ -89,6 +89,7 @@ loop depth pos = do
 					book <- openingBook
 					forM_ (openingBookProposals book pos) $ \ (move,rating) -> do
 						putStrConsoleLn $ printf "  -> %s ( %+2.2f )" (showMove pos move) rating
+					loop depth pos
 				depthstr | length depthstr > 0 && all isDigit depthstr -> do
 					let (depth',""):_ = (reads :: ReadS Int) depthstr
 					putStrConsoleLn $ "Setting depth = " ++ show depth'
