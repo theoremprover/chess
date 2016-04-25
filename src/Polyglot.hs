@@ -229,6 +229,19 @@ pos2key Position{..} = ((piece `xor` castle) `xor` enpassant) `xor` turn
 
 type OpeningBook = HashMap.HashMap Word64 [(Coors,Coors,Maybe PieceType,Word16)]
 
+t = do
+	f <- BS.readFile openingBookFilePath
+	let bs = BS.take 16 f
+	print $ BS.unpack bs
+	case eitherResult $ parse p_p bs of
+		Left errmsg -> error errmsg
+		Right ms  -> putStrLn $ ms
+
+p_p = do
+	ret <- test_p
+	endOfInput
+	return ret
+
 test_p :: Parser String
 test_p = do
 		keyb    <- anyWord64be
@@ -237,7 +250,7 @@ test_p = do
 		learnb  <- anyWord32be
 		let
 			bitfield3 :: Int -> Int
-			bitfield3 i = fromIntegral $ 7 `xor` (shiftR moveb i)
+			bitfield3 i = fromIntegral $ 7 .&. (shiftR moveb i)
 			(from,to) :: (Coors,Coors) = ((bitfield3 6,bitfield3 9),(bitfield3 0,bitfield3 3))
 			mb_prom :: Maybe PieceType = case bitfield3 12 of
 				0 -> Nothing
@@ -246,25 +259,26 @@ test_p = do
 			keyb moveb weightb learnb (show from) (show to) (show mb_prom)
 
 polyglot_move_p = do
-		keyb    <- anyWord64be
-		moveb   <- anyWord16be
-		weightb <- anyWord16be
-		learnb  <- anyWord32be
-		let
-			bitfield3 i = fromIntegral $ 7 `xor` (shiftR moveb i)
-			(from,to) = ((bitfield3 6,bitfield3 9),(bitfield3 0,bitfield3 3))
-			mb_prom = case bitfield3 12 of
-				0 -> Nothing
-				i -> Just $ toEnum (i-1)
-		return (keyb,[(from,to,mb_prom,weightb)])
+	keyb    <- anyWord64be
+	moveb   <- anyWord16be
+	weightb <- anyWord16be
+	learnb  <- anyWord32be
+	let
+		bitfield3 i = fromIntegral $ 7 .&. (shiftR moveb i)
+		(from,to) = ((bitfield3 6,bitfield3 9),(bitfield3 0,bitfield3 3))
+		mb_prom = case bitfield3 12 of
+			0 -> Nothing
+			i -> Just $ toEnum (i-1)
+	return (keyb,[(from,to,mb_prom,weightb)])
 
 polyglot_book_p :: Parser OpeningBook
 polyglot_book_p = do
 	l <- many' polyglot_move_p
 	return $ HashMap.fromListWith (++) l
 
+openingBookFilePath = "../opening_book/Stockfish Book/book.bin"
 openingBook = do
-	bs <- BS.readFile "../opening_book/Stockfish Book/book.bin"
+	bs <- BS.readFile openingBookFilePath
 	case eitherResult $ parse polyglot_book_p bs of
 		Left errmsg -> error errmsg
 		Right book  -> return book

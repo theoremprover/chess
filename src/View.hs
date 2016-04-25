@@ -168,12 +168,6 @@ stringToPosition col_to_move s = Position (array ((1,1),(8,8)) $
 	tofig c = Just (toEnum (div i 6),toEnum (mod i 6)) where
 		i = ord c - ord 'Ù'
 
-t = do
-	f <- readFile "BK-Test.txt"
-	let ls = lines f
-	forM_ ls $ \ l -> do
-		print $ parse epd_p "" l
-
 showMove_FromTo Move{..} = showCoors moveFrom ++ showCoors moveTo ++ maybe "" pieceStr movePromote
 
 showLine :: [Move] -> String
