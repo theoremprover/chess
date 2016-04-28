@@ -46,6 +46,8 @@ tp = stringToPosition White [
 	"çØçØçØçØ",
 	"ÞçØçØçØç" ]
 
+p = tp { positionCanCastleQueenSide = [], positionCanCastleKingSide=[] }
+
 main = do
 --	writeFile "test.txt" ""
 	putStrConsoleLn "Cutoffs  ëÚêÝíÛéÜ"
@@ -87,8 +89,8 @@ loop depth pos = do
 				"r" -> loop depth initialPosition
 				"book" -> do
 					book <- openingBook
-					forM_ (openingBookProposals book pos) $ \ (move,rating) -> do
-						putStrConsoleLn $ printf "  -> %s ( %+2.2f )" (showMove pos move) rating
+					forM_ (openingBookProposals book pos) $ \ (move,weight) -> do
+						putStrConsoleLn $ printf "  -> %5s ( %i )" (showMove pos move) weight
 					loop depth pos
 				depthstr | length depthstr > 0 && all isDigit depthstr -> do
 					let (depth',""):_ = (reads :: ReadS Int) depthstr

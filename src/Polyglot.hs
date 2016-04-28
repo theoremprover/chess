@@ -214,7 +214,7 @@ random64 = [
 pos2key :: Position -> Word64
 pos2key Position{..} = foldl xor 0 $ map (random64!!) $ piece++castle++enpassant++turn
 	where
-	piece = [ 64*(index (Ù,Þ) piecetype * 2 + if col==Black then 0 else 1) + 8*row + file |
+	piece = [ 64*(index (Ù,Þ) piecetype * 2 + if col==Black then 0 else 1) + 8*(row-1) + (file-1) |
 		((file,row),Just (col,piecetype)) <- assocs positionBoard ]
 	castle = map (768+) $
 		(if White `elem` positionCanCastleKingSide  then [0] else []) ++
@@ -223,29 +223,6 @@ pos2key Position{..} = foldl xor 0 $ map (random64!!) $ piece++castle++enpassant
 		(if Black `elem` positionCanCastleQueenSide then [3] else [])
 	enpassant = maybe [] (\ (file,_) -> [772+file]) positionEnPassantSquare
 	turn = if positionColourToMove == White then [780] else []
-
-t = index (Ù,Þ) Þ
-
-pk :: Position -> IO ()
-pk Position{..} = do
-	putStrLn $ printf "piece     = %016x" piece
-	putStrLn $ printf "castle    = %016x" castle
-	putStrLn $ printf "enpassant = %016x" enpassant
-	putStrLn $ printf "turn      = %016x" turn
-	putStrLn $ printf "key = %016x" (((piece `xor` castle) `xor` enpassant) `xor` turn)
-	where
-	piece = foldl xor 0 $ map (random64!!)
-		[ 64*(index (Ù,Þ) piecetype * 2 + if col==Black then 0 else 1) + 8*row + file |
-			((file,row),Just (col,piecetype)) <- assocs positionBoard ]
-	castle = foldl xor 0 $ map (random64!!) $ map (768+) $
-		(if White `elem` positionCanCastleKingSide  then [0] else []) ++
-		(if White `elem` positionCanCastleQueenSide then [1] else []) ++
-		(if Black `elem` positionCanCastleKingSide  then [2] else []) ++
-		(if Black `elem` positionCanCastleQueenSide then [3] else [])
-	enpassant = foldl xor 0 $ map (random64!!) $
-		maybe [] (\ (file,_) -> [772+file]) positionEnPassantSquare
-	turn = foldl xor 0 $ map (random64!!) $
-		if positionColourToMove == White then [780] else []
 
 type OpeningBook = HashMap.HashMap Word64 [(Coors,Coors,Maybe PieceType,Word16)]
 
@@ -288,7 +265,7 @@ polyglot_move_p = do
 		mb_prom = case bitfield3 12 of
 			0 -> Nothing
 			i -> Just $ toEnum (i-1)
-	return (keyb,[(from,to,mb_prom,weightb)])
+	return (keyb,[(from+1,to+1,mb_prom,weightb)])
 
 polyglot_book_p :: Parser OpeningBook
 polyglot_book_p = do
