@@ -212,7 +212,7 @@ random64 = [
    0xF8D626AAAF278509 ] :: [Word64]
 
 pos2key :: Position -> Word64
-pos2key Position{..} = foldl xor 0 $ map (random64!!) $ piece++castle++enpassant++turn
+pos2key pos@Position{..} = foldl xor 0 $ map (random64!!) $ piece++castle++enpassant++turn
 	where
 	piece = [ 64*(index (Ù,Þ) piecetype * 2 + if col==Black then 0 else 1) + 8*(row-1) + (file-1) |
 		((file,row),Just (col,piecetype)) <- assocs positionBoard ]
@@ -221,7 +221,9 @@ pos2key Position{..} = foldl xor 0 $ map (random64!!) $ piece++castle++enpassant
 		(if White `elem` positionCanCastleQueenSide then [1] else []) ++
 		(if Black `elem` positionCanCastleKingSide  then [2] else []) ++
 		(if Black `elem` positionCanCastleQueenSide then [3] else [])
-	enpassant = maybe [] (\ (file,_) -> [772+file]) positionEnPassantSquare
+	enpassant = case (positionEnPassantSquare,moveGenerator pos) of
+		(Just coors@(file,_),Right moves) | any isEnPassantMove moves -> [772+file]
+		_ -> []
 	turn = if positionColourToMove == White then [780] else []
 
 type OpeningBook = HashMap.HashMap Word64 [(Coors,Coors,Maybe PieceType,Word16)]

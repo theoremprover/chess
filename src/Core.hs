@@ -62,6 +62,10 @@ data Move = Move {
 	moveFrom :: Coors, moveTo :: Coors, moveTakes :: Maybe Coors, movePromote :: Maybe PieceType }
 	deriving (Eq,Show)
 
+isEnPassantMove Move{..} = case moveTakes of
+	Just coors -> coors /= moveTo
+	Nothing    -> False
+
 doMove :: Position -> Move -> Position
 doMove (Position board colour castlequeen castleking mb_ep halfmoves movecounter) move@(Move from to mb_take mb_promotion) =
 	Position (board // (

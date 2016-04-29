@@ -36,18 +36,6 @@ testPosition = stringToPosition Black [
 	"çØçØçØçØ",
 	"ÜçØçÞçØç" ]
 
-tp = stringToPosition White [
-	"çØçØçØçØ",
-	"ØçØçØçØç",
-	"çØçØçØçØ",
-	"ØçØçØçØç",
-	"çØçØçØçØ",
-	"ØçØçØçØç",
-	"çØçØçØçØ",
-	"ÞçØçØçØç" ]
-
-p = tp { positionCanCastleQueenSide = [], positionCanCastleKingSide=[] }
-
 main = do
 --	writeFile "test.txt" ""
 	putStrConsoleLn "Cutoffs  ëÚêÝíÛéÜ"
