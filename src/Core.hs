@@ -148,11 +148,13 @@ move_targets position@(Position board colour_to_move _ _ mb_ep _ _) = [ (piecety
 		(Ù,(_,r)) ->
 			filter (isNothing.snd) (dir_targets from (pawn_dir,if r==pawn_initial_rank then 2 else 1)) ++
 			filter (isJust.snd) (concatMap (dir_targets from) [(pawn_dir+west,1),(pawn_dir+east,1)]) ++
-			[ (abs_to,Just take) | r == pawnEnPassantRank colour_to_move, eastwest <- [east,west],
-				Just abs_to <- [ addrelcoors from (pawn_dir+eastwest) ],
+			[ (abs_to,addrelcoors from eastwest) |
+				Just abs_to <- [mb_ep],
+				Just from == addrelcoors 
+				r == pawnEnPassantRank colour_to_move, eastwest <- [east,west],
+				Just abs_to == addrelcoors from (pawn_dir+eastwest),
 				Nothing <- [ board!abs_to ],
-				Just take <- [ addrelcoors from eastwest ],
-				Just take == mb_ep,
+				Just take == addrelcoors abs_to pawn_dir,
 				Just (col,Ù) <- [ board!take ],
 				Just pawn_from <- [ addrelcoors from (pawn_dir*2+eastwest) ],
 				col == nextColour colour_to_move ]
