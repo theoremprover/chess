@@ -113,7 +113,7 @@ moveGenerator position@(Position board colour_to_move cancastlequeen cancastleki
 		_ -> case filter (king_no_check position) $ [ Move from to mb_take mb_promotion |
 			(piecetype,(from,(to,mb_take))) <- move_targets position,
 			mb_promotion <- case (piecetype,to) of
-				(Ù,(_,r)) | r == pawnInitialRank colour_to_move + 6 -> map Just [Ú,Û,Ü,Ý]
+				(Ù,(_,r)) | r==1 || r==8 -> map Just [Ú,Û,Ü,Ý]
 				_ -> [Nothing] ] ++
 			if colour_to_move `elem` cancastleking then
 				case map ((board!).(,castle_rank)) [5..8] of
