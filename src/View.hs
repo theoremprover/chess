@@ -124,7 +124,7 @@ showMove pos@Position{..} move@(Move from@(f0,r0) to mb_takes mb_promote) =
 		(Þ,(5,_),(7,_)) -> "O-O"
 		(Þ,(5,_),(3,_)) -> "O-O-O"
 		(piece_from,_,_) -> ( case mb_takes of
-			Just takes | takes/=to || piece_from == Ù -> showFile f0
+			Just takes | piece_from == Ù -> showFile f0
 			_ ->
 				pieceStr piece_from ++
 				head ([ if f==f0 then show r0 else showFile f0 |

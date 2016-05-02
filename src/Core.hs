@@ -113,7 +113,7 @@ moveGenerator position@(Position board colour_to_move cancastlequeen cancastleki
 		_ -> case filter (king_no_check position) $ [ Move from to mb_take mb_promotion |
 			(piecetype,(from,(to,mb_take))) <- move_targets position,
 			mb_promotion <- case (piecetype,to) of
-				(Ù,(_,r)) | r == 10 - pawnInitialRank colour_to_move -> map Just [Ú,Û,Ü,Ý]
+				(Ù,(_,r)) | r == pawnInitialRank colour_to_move + 6 -> map Just [Ú,Û,Ü,Ý]
 				_ -> [Nothing] ] ++
 			if colour_to_move `elem` cancastleking then
 				case map ((board!).(,castle_rank)) [5..8] of
@@ -150,14 +150,8 @@ move_targets position@(Position board colour_to_move _ _ mb_ep _ _) = [ (piecety
 			filter (isJust.snd) (concatMap (dir_targets from) [(pawn_dir+west,1),(pawn_dir+east,1)]) ++
 			[ (abs_to,addrelcoors from eastwest) |
 				Just abs_to <- [mb_ep],
-				Just from == addrelcoors 
-				r == pawnEnPassantRank colour_to_move, eastwest <- [east,west],
-				Just abs_to == addrelcoors from (pawn_dir+eastwest),
-				Nothing <- [ board!abs_to ],
-				Just take == addrelcoors abs_to pawn_dir,
-				Just (col,Ù) <- [ board!take ],
-				Just pawn_from <- [ addrelcoors from (pawn_dir*2+eastwest) ],
-				col == nextColour colour_to_move ]
+				eastwest <- [east,west],
+				Just abs_to == addrelcoors from (pawn_dir+eastwest) ]
 		_ -> concatMap (dir_targets from) $ case piecetype of
 			Ú -> map (,1) [
 				north*2+east,north*2+west,east*2+north,east*2+south,
