@@ -28,25 +28,24 @@ data Position = Position {
 	pMoveCounter        :: Int }
 	deriving (Eq)
 
-initialPosition = positionFromString White [
-	"âïáòäðàñ",
-	"îßîßîßîß",
-	"ØçØçØçØç",
-	"çØçØçØçØ",
-	"ØçØçØçØç",
-	"çØçØçØçØ",
-	"ÙèÙèÙèÙè",
-	"ëÚêÝíÛéÜ" ]
-
-positionFromString colour_to_move s = Position {
-	pColourToMove       = colour_to_move,
+initialPosition = Position {
+	pBoard = boardFromString [
+		"âïáòäðàñ",
+		"îßîßîßîß",
+		"ØçØçØçØç",
+		"çØçØçØçØ",
+		"ØçØçØçØç",
+		"çØçØçØçØ",
+		"ÙèÙèÙèÙè",
+		"ëÚêÝíÛéÜ" ],
+	pColourToMove       = White,
 	pCanCastleQueenSide = [White,Black],
 	pCanCastleKingSide  = [White,Black],
 	pEnPassantSquare    = Nothing,
 	pHalfmoveClock      = 0,
-	pMoveCounter        = 0,
-	pBoard              = listArray ((A,First),(H,Eighth)) $ map to_fig $ concat $ map reverse $ transpose s
-	}
+	pMoveCounter        = 0 }
+
+boardFromString s = listArray ((A,First),(H,Eighth)) $ map to_fig $ concat $ map reverse $ transpose s
 	where
 	to_fig c_rep = case if c_rep < 'ç' then c_rep else chr $ ord c_rep - ord 'ç' + ord 'Ø' of
 		c | c `elem` "ÙÚÛÜÝÞ" -> Just (White,toEnum (ord c - ord 'Ù'))
