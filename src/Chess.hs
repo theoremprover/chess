@@ -54,7 +54,7 @@ boardFromString s = listArray ((A,First),(H,Eighth)) $ map to_fig $ concat $ map
 
 instance Show Position where
 	show Position{..} = unlines $
-		[ "¿" ++ replicate 8 'À' ++ "Á" ] ++
+		[ "¿ÀÀÀÀÀÀÀÀÁ" ] ++
 		map show_rank [Eighth,Seventh .. First] ++
 		[ "Ä" ++ map (toEnum.(+0xce)) [1..8] ++ "Æ" ] ++
 		[ show pColourToMove ++ " to move" ]
