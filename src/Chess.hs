@@ -56,12 +56,24 @@ instance Show Position where
 	show Position{..} = unlines $
 		[ "¿ÀÀÀÀÀÀÀÀÁ" ] ++
 		map show_rank [Eighth,Seventh .. First] ++
-		[ "Ä" ++ map (toEnum.(+0xce)) [1..8] ++ "Æ" ] ++
+		[ "ÄÏÐÑÒÓÔÕÖÆ" ] ++
 		[ show pColourToMove ++ " to move" ]
 		where
-		show_rank rank = [ toEnum $ 0xc7 + index (First,Eighth) rank ] ++
+		show_rank rank = [ "ÇÈÉÊËÌÍÎ" !! index (First,Eighth) rank ] ++
 			map (show_square rank) [A .. H] ++ "Ã"
-		show_square rank file = toEnum $ 0xd8 + mod (index (First,Eighth) rank + index (A,H) file) 2 * 15 +
+		show_square rank file = case pBoard!(file,rank) of
+				Nothing -> if darksquare then 'ç' else 'Ø'
+				Just (White,piece) | darksquare -> "èéêëìí" !! (fromEnum piece)
+				Just (White,piece)              -> "ÙÚÛÜÝÞ" !! (fromEnum piece)
+				Just (Black,piece) | darksquare -> "îïðñòó" !! (fromEnum piece)
+				Just (Black,piece)              -> "ßàáâãä" !! (fromEnum piece)
+
+			mod (index (First,Eighth) rank + index (A,H) file) 2 of
+			0 -> 
+			1 -> 
+			+ 
+
+toEnum $ 0xd8 + mod (index (First,Eighth) rank + index (A,H) file) 2 * 15 +
 			case pBoard!(file,rank) of
 				Nothing             -> 0
 				Just (colour,piece) -> 1 + fromEnum colour * 6 + fromEnum piece
