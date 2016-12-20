@@ -67,13 +67,5 @@ instance Show Position where
 				Just (White,piece)              -> "ÙÚÛÜÝÞ" !! (fromEnum piece)
 				Just (Black,piece) | darksquare -> "îïðñòó" !! (fromEnum piece)
 				Just (Black,piece)              -> "ßàáâãä" !! (fromEnum piece)
-
-			mod (index (First,Eighth) rank + index (A,H) file) 2 of
-			0 -> 
-			1 -> 
-			+ 
-
-toEnum $ 0xd8 + mod (index (First,Eighth) rank + index (A,H) file) 2 * 15 +
-			case pBoard!(file,rank) of
-				Nothing             -> 0
-				Just (colour,piece) -> 1 + fromEnum colour * 6 + fromEnum piece
+			where
+			darksquare = mod (index (First,Eighth) rank + index (A,H) file) 2 == 0
