@@ -69,3 +69,13 @@ instance Show Position where
 				Just (Black,piece)              -> "ßàáâãä" !! (fromEnum piece)
 			where
 			darksquare = mod (index (First,Eighth) rank + index (A,H) file) 2 == 0
+
+moveGen Position{..} = concatMap piece_moves (assocs pBoard) where
+	piece_moves (col,Just piece) | col == pColourToMove = case piece of
+		Ù -> []
+		Ú -> []
+		Û -> []
+		Ü -> []
+		Ý -> []
+		Þ -> []
+	piece_moves _ = []
