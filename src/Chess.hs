@@ -7,6 +7,10 @@ import Data.Maybe
 import Data.Ix
 import Data.Char
 import Data.List
+import Data.Tuple
+import Data.NumInstances
+
+infixl 6 +@
 
 data Piece = Ù | Ú | Û | Ü | Ý | Þ deriving (Show,Eq,Enum)
 data Colour = White | Black deriving (Show,Eq,Enum)
@@ -59,7 +63,7 @@ instance Show Position where
 		[ "ÄÏÐÑÒÓÔÕÖÆ" ] ++
 		[ show pColourToMove ++ " to move" ]
 		where
-		show_rank rank = [ "ÇÈÉÊËÌÍÎ" !! index (First,Eighth) rank ] ++
+		show_rank rank = [ "ÇÈÉÊËÌÍÎ" !! fromEnum rank ] ++
 			map (show_square rank) [A .. H] ++ "Ã"
 		show_square rank file = case pBoard!(file,rank) of
 				Nothing -> if darksquare then 'ç' else 'Ø'
@@ -68,14 +72,27 @@ instance Show Position where
 				Just (Black,piece) | darksquare -> "îïðñòó" !! (fromEnum piece)
 				Just (Black,piece)              -> "ßàáâãä" !! (fromEnum piece)
 			where
-			darksquare = mod (index (First,Eighth) rank + index (A,H) file) 2 == 0
+			darksquare = mod (fromEnum rank + fromEnum file) 2 == 0
+
+Nothing +@ _ = Nothing
+(Just (file,rank)) +@ (δfile,δrank) = 
 
 moveGen Position{..} = concatMap piece_moves (assocs pBoard) where
-	piece_moves (col,Just piece) | col == pColourToMove = case piece of
+	piece_moves (from,Just (col,piece)) | col == pColourToMove = case piece of
+		Ú -> targets from
+				[ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
+				
 		Ù -> []
-		Ú -> []
-		Û -> []
-		Ü -> []
-		Ý -> []
-		Þ -> []
+		_ -> [] {-
+			Û -> []
+			Ü -> []
+			Ý -> []
+			Þ -> []
+-}
 	piece_moves _ = []
+
+	(north,south,east,west) = ((0,1),(0,-1),(1,0),(-1,0))
+	-- ∂
+	add_dir (file,rank) (dfile,drank) = case (fromEnum file + dfile,fromEnum rank + drank) of
+		(ifile,irank) | ifile ´elem´ [0..7] && irank `elem` [0..7] -> 
+	targets from directions = []
