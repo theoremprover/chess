@@ -74,25 +74,30 @@ instance Show Position where
 			where
 			darksquare = mod (fromEnum rank + fromEnum file) 2 == 0
 
-Nothing +@ _ = Nothing
-(Just (file,rank)) +@ (δfile,δrank) = 
+moveTargets Ú _ _ = map (,[]) [ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
+moveTargets Ù (_,Second) White = [ north*2,
+
+(+@) :: Maybe Coors -> (Int,Int) -> Maybe Coors
+(Just (file,rank)) +@ (δfile,δrank) | ifile `elem` [0..7] && irank `elem` [0..7] =
+	Just (toEnum ifile,toEnum irank)
+	where
+	(ifile,irank) = (fromEnum file + δfile,fromEnum rank + δrank)
+_ +@ _ = Nothing
 
 moveGen Position{..} = concatMap piece_moves (assocs pBoard) where
-	piece_moves (from,Just (col,piece)) | col == pColourToMove = case piece of
-		Ú -> targets from
-				[ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
+	piece_moves (fromJust (col,piece)) | col == pColourToMove = case piece of
+		Ú -> from `try_move_to`
 				
+{-
 		Ù -> []
-		_ -> [] {-
+		_ -> []
 			Û -> []
 			Ü -> []
 			Ý -> []
 			Þ -> []
--}
 	piece_moves _ = []
 
 	(north,south,east,west) = ((0,1),(0,-1),(1,0),(-1,0))
 	-- ∂
-	add_dir (file,rank) (dfile,drank) = case (fromEnum file + dfile,fromEnum rank + drank) of
-		(ifile,irank) | ifile ´elem´ [0..7] && irank `elem` [0..7] -> 
-	targets from directions = []
+	add_dir (file,rank) (dfile,drank) = 
+	try_move_to from directions = []
