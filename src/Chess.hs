@@ -74,8 +74,10 @@ instance Show Position where
 			where
 			darksquare = mod (fromEnum rank + fromEnum file) 2 == 0
 
-moveTargets Ú _ _ = map (,[]) [ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
-moveTargets Ù (_,Second) White = [ north*2,
+moveTargets Ú = [ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
+--moveTargets Ù (_,Second) White = [ (north*2,[north]),(north,[north]) ]
+moveTargets Û =  ++ 
+moveTargets Ý = 
 
 (+@) :: Maybe Coors -> (Int,Int) -> Maybe Coors
 (Just (file,rank)) +@ (δfile,δrank) | ifile `elem` [0..7] && irank `elem` [0..7] =
@@ -84,10 +86,25 @@ moveTargets Ù (_,Second) White = [ north*2,
 	(ifile,irank) = (fromEnum file + δfile,fromEnum rank + δrank)
 _ +@ _ = Nothing
 
+data Move = Move {
+	moveFrom :: Coors, moveTo :: Coors, moveTakes :: Maybe Coors, movePromote :: Maybe PieceType }
+	deriving (Eq,Show)
+
 moveGen Position{..} = concatMap piece_moves (assocs pBoard) where
-	piece_moves (fromJust (col,piece)) | col == pColourToMove = case piece of
-		Ú -> from `try_move_to`
-				
+	piece_moves (from,Just (col,piece)) | col == pColourToMove = case piece of
+		Ú -> map (try_move_to from) [ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
+		Û -> map (rec_move from) [ north+east,north+west,south+east,south+west ]
+	try_move_to from δ = case (Just from) +@ δ of
+		Nothing -> []
+		Just to -> case pBoard!to to
+			Nothing -> [ Move from to Nothing promo | promo <- promotions to 
+			Just (col,_) | col /= pColourToMove -> takemove
+			_ -> []
+		where
+		promotions (_,rank) = case (pBoard!from, of
+			Just (White,Ù) | rank==Eighth -> map Just [Ú,Û,Ü,Ý]
+			Just (Black,Ù) | rank==First  -> map Just [Ú,Û,Ü,Ý]
+			_ -> [ Nothing ]
 {-
 		Ù -> []
 		_ -> []
