@@ -74,11 +74,6 @@ instance Show Position where
 			where
 			darksquare = mod (fromEnum rank + fromEnum file) 2 == 0
 
-moveTargets Ú = [ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
---moveTargets Ù (_,Second) White = [ (north*2,[north]),(north,[north]) ]
-moveTargets Û =  ++ 
-moveTargets Ý = 
-
 (+@) :: Maybe Coors -> (Int,Int) -> Maybe Coors
 (Just (file,rank)) +@ (δfile,δrank) | ifile `elem` [0..7] && irank `elem` [0..7] =
 	Just (toEnum ifile,toEnum irank)
@@ -87,24 +82,36 @@ moveTargets Ý =
 _ +@ _ = Nothing
 
 data Move = Move {
-	moveFrom :: Coors, moveTo :: Coors, moveTakes :: Maybe Coors, movePromote :: Maybe PieceType }
+	moveFrom :: Coors, moveTo :: Coors, moveTakes :: Maybe Coors, movePromote :: Maybe Piece }
 	deriving (Eq,Show)
 
 moveGen Position{..} = concatMap piece_moves (assocs pBoard) where
+
+	(north,south,east,west) = ((0,1),(0,-1),(1,0),(-1,0))
+
 	piece_moves (from,Just (col,piece)) | col == pColourToMove = case piece of
-		Ú -> map (try_move_to from) [ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
-		Û -> map (rec_move from) [ north+east,north+west,south+east,south+west ]
+		Ú -> concatMap (try_move_to from) [ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
+		Û -> concatMap (rec_move 1 from) [ north+east,north+west,south+east,south+west ]
+		_ -> []
+	piece_moves _ = []
+
+	rec_move i from δ = case try_move_to from i*δ of
+		[] -> []
+		moves@(Move _ to Nothing _ : _) -> moves ++ rec_move (i+1) from δ
+
 	try_move_to from δ = case (Just from) +@ δ of
 		Nothing -> []
-		Just to -> case pBoard!to to
-			Nothing -> [ Move from to Nothing promo | promo <- promotions to 
-			Just (col,_) | col /= pColourToMove -> takemove
+		Just to -> case pBoard!to of
+			Nothing -> [ Move from to Nothing promo | promo <- promotions to ]
+			Just (col,_) | col /= pColourToMove -> [ Move from to (Just to) promo | promo <- promotions to ]
 			_ -> []
 		where
-		promotions (_,rank) = case (pBoard!from, of
+		promotions (_,rank) = case pBoard!from of
 			Just (White,Ù) | rank==Eighth -> map Just [Ú,Û,Ü,Ý]
 			Just (Black,Ù) | rank==First  -> map Just [Ú,Û,Ü,Ý]
 			_ -> [ Nothing ]
+
+
 {-
 		Ù -> []
 		_ -> []
@@ -112,9 +119,8 @@ moveGen Position{..} = concatMap piece_moves (assocs pBoard) where
 			Ü -> []
 			Ý -> []
 			Þ -> []
-	piece_moves _ = []
 
-	(north,south,east,west) = ((0,1),(0,-1),(1,0),(-1,0))
 	-- ∂
 	add_dir (file,rank) (dfile,drank) = 
 	try_move_to from directions = []
+-}
