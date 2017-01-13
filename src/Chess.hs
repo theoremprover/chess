@@ -10,10 +10,10 @@ import Data.List
 import Data.Tuple
 import Data.NumInstances
 
-infixl 6 +@
-
 data Piece = Ù | Ú | Û | Ü | Ý | Þ deriving (Show,Eq,Enum)
 data Colour = White | Black deriving (Show,Eq,Enum)
+nextColour White = Black
+nextColour Black = White
 data File = A | B | C | D | E | F | G | H
 	deriving (Show,Ix,Ord,Eq,Enum)
 data Rank = First | Second | Third | Fourth | Fifth | Sixth | Seventh | Eighth
@@ -74,6 +74,7 @@ instance Show Position where
 			where
 			darksquare = mod (fromEnum rank + fromEnum file) 2 == 0
 
+infixl 6 +@
 (+@) :: Maybe Coors -> (Int,Int) -> Maybe Coors
 (Just (file,rank)) +@ (δfile,δrank) | ifile `elem` [0..7] && irank `elem` [0..7] =
 	Just (toEnum ifile,toEnum irank)
@@ -95,22 +96,33 @@ moveGen Position{..} = concatMap piece_moves (assocs pBoard) where
 		_ -> []
 	piece_moves _ = []
 
-	rec_move i from δ = case try_move_to from i*δ of
-		[] -> []
-		moves@(Move _ to Nothing _ : _) -> moves ++ rec_move (i+1) from δ
+	rec_move :: Int -> Coors -> (Int,Int) -> [Move]
+	rec_move i from (f,r) = case try_move_to from (f*i,r*i) of
+		moves@(Move _ to Nothing _ : _) -> moves ++ rec_move (i+1) from (f,r)
+		moves -> moves
 
+	try_move_to :: Coors -> (Int,Int) -> [Move]
 	try_move_to from δ = case (Just from) +@ δ of
 		Nothing -> []
-		Just to -> case pBoard!to of
-			Nothing -> [ Move from to Nothing promo | promo <- promotions to ]
-			Just (col,_) | col /= pColourToMove -> [ Move from to (Just to) promo | promo <- promotions to ]
+		Just to@(_,rank) -> case pBoard!to of
+			Nothing                             -> [ Move from to Nothing promo   | promo <- promotions ]
+			Just (col,_) | col /= pColourToMove -> [ Move from to (Just to) promo | promo <- promotions ]
 			_ -> []
-		where
-		promotions (_,rank) = case pBoard!from of
-			Just (White,Ù) | rank==Eighth -> map Just [Ú,Û,Ü,Ý]
-			Just (Black,Ù) | rank==First  -> map Just [Ú,Û,Ü,Ý]
-			_ -> [ Nothing ]
+			where
+			promotions = case pBoard!from of
+				Just (White,Ù) | rank==Eighth -> map Just [Ú,Û,Ü,Ý]
+				Just (Black,Ù) | rank==First  -> map Just [Ú,Û,Ü,Ý]
+				_ -> [ Nothing ]
 
+doMove Move{..} Position{..} = Position {
+	pBoard              = 
+	pColourToMove       = nextColour pColourToMove,
+	pCanCastleQueenSide = [White,Black],
+	pCanCastleKingSide  = [White,Black],
+	pEnPassantSquare    = Nothing,
+	pHalfmoveClock      = pHalfmoveClock + 1,
+	pMoveCounter        = pMoveCounter + 1
+	}
 
 {-
 		Ù -> []
