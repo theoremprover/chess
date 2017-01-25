@@ -110,12 +110,12 @@ moveGen Position{..} = concatMap piece_moves (assocs pBoard) where
 			_ -> []
 			where
 			promotions = case pBoard!from of
-				Just (White,Ù) | rank==Eighth -> map Just [Ú,Û,Ü,Ý]
-				Just (Black,Ù) | rank==First  -> map Just [Ú,Û,Ü,Ý]
+				Just (White,Ù) | rank==Seventh -> map Just [Ú,Û,Ü,Ý]
+				Just (Black,Ù) | rank==Second  -> map Just [Ú,Û,Ü,Ý]
 				_ -> [ Nothing ]
 
 doMove Move{..} Position{..} = Position {
-	pBoard              = 
+	pBoard              = pBoard // [ (moveFrom,Nothing), (moveTo,pBoard!moveFrom) ]
 	pColourToMove       = nextColour pColourToMove,
 	pCanCastleQueenSide = [White,Black],
 	pCanCastleKingSide  = [White,Black],
