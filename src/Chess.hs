@@ -1,4 +1,4 @@
-{-# LANGUAGE UnicodeSyntax,RecordWildCards #-}
+{-# LANGUAGE UnicodeSyntax,RecordWildCards,TypeSynonymInstances,FlexibleInstances,OverlappingInstances #-}
 
 module Main where
 
@@ -82,9 +82,16 @@ infixl 6 +@
 	(ifile,irank) = (fromEnum file + δfile,fromEnum rank + δrank)
 _ +@ _ = Nothing
 
+instance Show Coors where
+	show (file,rank) = show file ++ show (fromEnum rank + 1)
+
 data Move = Move {
 	moveFrom :: Coors, moveTo :: Coors, moveTakes :: Maybe Coors, movePromote :: Maybe Piece }
-	deriving (Eq,Show)
+	deriving Eq
+instance Show Move where
+	show Move{..} = show moveFrom ++ if isJust moveTakes then "x" else "" ++ show moveTo ++ case movePromote of
+		Nothing -> ""
+		Just piece -> show piece
 
 moveGen Position{..} = concatMap piece_moves (assocs pBoard) where
 
@@ -115,7 +122,7 @@ moveGen Position{..} = concatMap piece_moves (assocs pBoard) where
 				_ -> [ Nothing ]
 
 doMove Move{..} Position{..} = Position {
-	pBoard				= pBoard // ( move moveFrom moveTo ++ mb_take ++ mb_castling )
+	pBoard				= pBoard // ( move moveFrom moveTo ++ mb_take ++ mb_castling ),
 	pColourToMove       = nextColour pColourToMove,
 	pCanCastleQueenSide = (if no_castling_queenside_any_more then delete pColourToMove else id) pCanCastleQueenSide,
 	pCanCastleKingSide  = (if no_castling_kingside_any_more  then delete pColourToMove else id) pCanCastleKingSide,
@@ -124,22 +131,27 @@ doMove Move{..} Position{..} = Position {
 	pMoveCounter        = pMoveCounter + 1
 	}
 	where
+
 	move from to = [ (from,Nothing), (to,pBoard!from) ]
-	mb_take = case moveTake of
+
+	mb_take = case moveTakes of
 		Nothing    -> []
 		Just coors -> [ (coors,Nothing) ]
+
 	Just (_,moved_piece) = pBoard!moveFrom
-	(mb_castling,queenside,kingside) = case (moved_piece,moveFrom,moveTo) of
-		(Þ,(E,rank),(G,_)) -> ([ move (H,rank) (F,rank) ],False,True)
-		(Þ,(E,rank),(C,_)) -> ([ move (A,rank) (D,rank) ],True,False)
 
-	(no_castling_queenside_any_more,no_castling_kingside_any_more) =
-		queenside || kingside || moved_piece==Þ || case (moveFrom,pColourToMove) of
-			((H,First),White)  -> (False,True)
-			((A,First),White)  -> (True,False)
-			((H,Eighth),Black) -> (False,True)
-			((A,Eighth),Black) -> (True,False)
+	mb_castling = case (moved_piece,moveFrom,moveTo) of
+		(Þ,(E,rank),(G,_)) -> move (H,rank) (F,rank)
+		(Þ,(E,rank),(C,_)) -> move (A,rank) (D,rank)
+		_                   -> []
 
+	(no_castling_queenside_any_more,no_castling_kingside_any_more) = case (moveFrom,pColourToMove) of
+		_ | moved_piece==Þ -> (True,True)
+		((H,First),White)  -> (False,True)
+		((A,First),White)  -> (True,False)
+		((H,Eighth),Black) -> (False,True)
+		((A,Eighth),Black) -> (True,False)
+		_                  -> (False,False)
 
 {-
 		Ù -> []
