@@ -115,14 +115,31 @@ moveGen Position{..} = concatMap piece_moves (assocs pBoard) where
 				_ -> [ Nothing ]
 
 doMove Move{..} Position{..} = Position {
-	pBoard              = pBoard // [ (moveFrom,Nothing), (moveTo,pBoard!moveFrom) ]
+	pBoard				= pBoard // ( move moveFrom moveTo ++ mb_take ++ mb_castling )
 	pColourToMove       = nextColour pColourToMove,
-	pCanCastleQueenSide = [White,Black],
-	pCanCastleKingSide  = [White,Black],
+	pCanCastleQueenSide = (if no_castling_queenside_any_more then delete pColourToMove else id) pCanCastleQueenSide,
+	pCanCastleKingSide  = (if no_castling_kingside_any_more  then delete pColourToMove else id) pCanCastleKingSide,
 	pEnPassantSquare    = Nothing,
 	pHalfmoveClock      = pHalfmoveClock + 1,
 	pMoveCounter        = pMoveCounter + 1
 	}
+	where
+	move from to = [ (from,Nothing), (to,pBoard!from) ]
+	mb_take = case moveTake of
+		Nothing    -> []
+		Just coors -> [ (coors,Nothing) ]
+	Just (_,moved_piece) = pBoard!moveFrom
+	(mb_castling,queenside,kingside) = case (moved_piece,moveFrom,moveTo) of
+		(Þ,(E,rank),(G,_)) -> ([ move (H,rank) (F,rank) ],False,True)
+		(Þ,(E,rank),(C,_)) -> ([ move (A,rank) (D,rank) ],True,False)
+
+	(no_castling_queenside_any_more,no_castling_kingside_any_more) =
+		queenside || kingside || moved_piece==Þ || case (moveFrom,pColourToMove) of
+			((H,First),White)  -> (False,True)
+			((A,First),White)  -> (True,False)
+			((H,Eighth),Black) -> (False,True)
+			((A,Eighth),Black) -> (True,False)
+
 
 {-
 		Ù -> []
