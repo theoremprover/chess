@@ -89,19 +89,40 @@ data Move = Move {
 	moveFrom :: Coors, moveTo :: Coors, moveTakes :: Maybe Coors, movePromote :: Maybe Piece }
 	deriving Eq
 instance Show Move where
-	show Move{..} = show moveFrom ++ if isJust moveTakes then "x" else "" ++ show moveTo ++ case movePromote of
+	show Move{..} = show moveFrom ++ (if isJust moveTakes then "x" else "") ++ show moveTo ++ case movePromote of
 		Nothing -> ""
 		Just piece -> show piece
 
 moveGen Position{..} = concatMap piece_moves (assocs pBoard) where
 
 	(north,south,east,west) = ((0,1),(0,-1),(1,0),(-1,0))
-
+	diagonal = [ north+east,north+west,south+east,south+west ]
+	straight = [ north,west,south,east ]
 	piece_moves (from,Just (col,piece)) | col == pColourToMove = case piece of
+		Ù -> case (Just from) +@ pawn_dir of
+			Nothing -> []
+			Just to -> case pBoard!to of
+				Just _ -> []
+				Nothing -> [ Move from to Nothing promo | promo <- promotions ] ++
+					case (Just from) +@ 2*pawn_dir of
+						Nothing -> []
+						Just to2 -> case (from,col,pBoard!to2) of
+							((_,Second), White,Nothing) -> [ Move from to2 Nothing Nothing ]
+							((_,Seventh),Black,Nothing) -> [ Move from to2 Nothing Nothing ]
+					where
+					promotions = case from of
+						(_,Seventh) | col==White -> map Just [Ú,Û,Ü,Ý]
+						(_,Second)  | col==Black -> map Just [Ú,Û,Ü,Ý]
+						_ -> [ Nothing ]
 		Ú -> concatMap (try_move_to from) [ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
-		Û -> concatMap (rec_move 1 from) [ north+east,north+west,south+east,south+west ]
+		Û -> concatMap (rec_move 1 from) diagonal
+		Ü -> concatMap (rec_move 1 from) straight
+		Ý -> concatMap (rec_move 1 from) (diagonal++straight)
+		Þ -> concatMap (try_move_to from) (diagonal++straight)
 		_ -> []
 	piece_moves _ = []
+
+	pawn_dir = if pColourToMove == White then north else south
 
 	rec_move :: Int -> Coors -> (Int,Int) -> [Move]
 	rec_move i from (f,r) = case try_move_to from (f*i,r*i) of
@@ -112,14 +133,9 @@ moveGen Position{..} = concatMap piece_moves (assocs pBoard) where
 	try_move_to from δ = case (Just from) +@ δ of
 		Nothing -> []
 		Just to@(_,rank) -> case pBoard!to of
-			Nothing                             -> [ Move from to Nothing promo   | promo <- promotions ]
-			Just (col,_) | col /= pColourToMove -> [ Move from to (Just to) promo | promo <- promotions ]
+			Nothing -> [ Move from to Nothing Nothing ]
+			Just (col,_) | col /= pColourToMove -> [ Move from to (Just to) Nothing ]
 			_ -> []
-			where
-			promotions = case pBoard!from of
-				Just (White,Ù) | rank==Seventh -> map Just [Ú,Û,Ü,Ý]
-				Just (Black,Ù) | rank==Second  -> map Just [Ú,Û,Ü,Ý]
-				_ -> [ Nothing ]
 
 doMove Move{..} Position{..} = Position {
 	pBoard				= pBoard // ( move moveFrom moveTo ++ mb_take ++ mb_castling ),
@@ -127,9 +143,10 @@ doMove Move{..} Position{..} = Position {
 	pCanCastleQueenSide = (if no_castling_queenside_any_more then delete pColourToMove else id) pCanCastleQueenSide,
 	pCanCastleKingSide  = (if no_castling_kingside_any_more  then delete pColourToMove else id) pCanCastleKingSide,
 	pEnPassantSquare    = Nothing,
-	pHalfmoveClock      = pHalfmoveClock + 1,
+	pHalfmoveClock      = if isJust moveTakes || moved_piece==Ù then 0 else pHalfmoveClock+1,
 	pMoveCounter        = pMoveCounter + 1
 	}
+
 	where
 
 	move from to = [ (from,Nothing), (to,pBoard!from) ]
@@ -146,22 +163,26 @@ doMove Move{..} Position{..} = Position {
 		_                   -> []
 
 	(no_castling_queenside_any_more,no_castling_kingside_any_more) = case (moveFrom,pColourToMove) of
-		_ | moved_piece==Þ -> (True,True)
-		((H,First),White)  -> (False,True)
-		((A,First),White)  -> (True,False)
-		((H,Eighth),Black) -> (False,True)
-		((A,Eighth),Black) -> (True,False)
+		_ | moved_piece==Þ -> (True, True )
+		((H,First), White) -> (False,True )
+		((A,First), White) -> (True ,False)
+		((H,Eighth),Black) -> (False,True )
+		((A,Eighth),Black) -> (True ,False)
 		_                  -> (False,False)
 
-{-
-		Ù -> []
-		_ -> []
-			Û -> []
-			Ü -> []
-			Ý -> []
-			Þ -> []
+main = do
+	loop initialPosition
 
-	-- ∂
-	add_dir (file,rank) (dfile,drank) = 
-	try_move_to from directions = []
--}
+loop pos = do
+	print pos
+	let moves = moveGen pos
+	print moves
+	s <- getLine
+	case s of
+		"q" -> return ()
+		"b" -> 
+		m -> case filter (m==) (map show moves) of
+			[] -> do
+				putStrLn "No move."
+				loop pos
+			[move] -> loop (doMove move pos)
