@@ -96,12 +96,12 @@ instance Show Move where
 		Just Ü -> "R"
 		Just Ý -> "Q"
 
-moveGen Position{..} = concatMap piece_moves (assocs pBoard) where
+moveGen pos@Position{..} = concatMap piece_moves (assocs pBoard) where
 
 	(north,south,east,west) = ((0,1),(0,-1),(1,0),(-1,0))
 	diagonal = [ north+east,north+west,south+east,south+west ]
 	straight = [ north,west,south,east ]
-	piece_moves (from,Just (col,piece)) | col == pColourToMove = case piece of
+	piece_moves (from,Just (col,piece)) | col == pColourToMove = filter noKingSack $ case piece of
 		Ù ->
 			maybe_move from ((Just from) +@ pawn_dir) ++
 			(case (Just from) +@ pawn_dir of
@@ -114,8 +114,7 @@ moveGen Position{..} = concatMap piece_moves (assocs pBoard) where
 		Ü -> concatMap (rec_move 1 from) straight
 		Ý -> concatMap (rec_move 1 from) (diagonal++straight)
 		Þ -> concatMap (try_move_to from) (diagonal++straight) ++
-			try_castle_kingside ++ try_castle_quenside
-		_ -> []
+			try_castle_kingside -- ++ try_castle_quenside
 	piece_moves _ = []
 
 	pawn_dir = if pColourToMove == White then north else south
@@ -142,17 +141,26 @@ moveGen Position{..} = concatMap piece_moves (assocs pBoard) where
 		(_,First)  | pColourToMove==Black -> map Just [Ú,Û,Ü,Ý]
 		_ -> [ Nothing ]
 
-	try_castle_kingside |
+	try_castle_kingside = if
 		pColourToMove `elem` pCanCastleKingSide &&
 		isEmpty (F,base_row) && isEmpty (G,base_row) &&
-		noCheck (E,base_row) && noCheck (F,base_row) && noCheck (G,base_row) =
-			[ Move (E,base_row) (G,base_row) Nothing Nothing ]
-		where
-		base_row = if pColourToMove == White then First else Eighth 
-		isEmpty coors = isNothing (pBoard!coors)
-		noCheck coors = 
+		noCheck pos (E,base_row) && noCheck pos (F,base_row) && noCheck pos (G,base_row) then
+		[ Move (E,base_row) (G,base_row) Nothing Nothing ] else []
 
-		
+	base_row = if pColourToMove == White then First else Eighth 
+	isEmpty coors = isNothing (pBoard!coors)
+	
+	noCheck pos coors = not $ coors `elem` (map moveTo $ moveGen $ pos {
+		pColourToMove = nextColour pColourToMove,
+		pCanCastleQueenSide = [], pCanCastleKingSide = [] })
+
+	noKingSack move = noCheck pos' kings_coors
+		where
+		pos' = doMove move pos
+		[ kings_coors ] = [ coors | (coors,Just (col,Þ)) <- assocs (pb pos'), col==pColourToMove ]
+
+pb x = pBoard x
+
 doMove Move{..} Position{..} = Position {
 	pBoard				= pBoard // ( mb_take ++ move moveFrom moveTo ++ mb_castling ),
 	pColourToMove       = nextColour pColourToMove,
@@ -160,8 +168,7 @@ doMove Move{..} Position{..} = Position {
 	pCanCastleKingSide  = (if no_castling_kingside_any_more  then delete pColourToMove else id) pCanCastleKingSide,
 	pEnPassantSquare    = Nothing,
 	pHalfmoveClock      = if isJust moveTakes || moved_piece==Ù then 0 else pHalfmoveClock+1,
-	pMoveCounter        = pMoveCounter + 1
-	}
+	pMoveCounter        = pMoveCounter + 1 }
 
 	where
 
@@ -193,6 +200,7 @@ loop poss@(pos:lastpos) = do
 	print pos
 	let moves = moveGen pos
 	print moves
+	putStr "> "
 	s <- getLine
 	case s of
 		"q" -> return ()
