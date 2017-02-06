@@ -103,6 +103,7 @@ moveGen pos = filter leads_not_to_king_sack $ moveTargets pos
 		king_sack (Move _ _ (Just takes) _) = case (pBoard pos')!takes of
 			Just (_,Þ) -> True
 			_ -> False
+		king_sack _ = False
 
 moveTargets pos@Position{..} = concatMap piece_moves (assocs pBoard)
 	where
