@@ -83,7 +83,7 @@ infixl 6 +@
 _ +@ _ = Nothing
 
 instance Show Coors where
-	show (file,rank) = show file ++ show (fromEnum rank + 1)
+	show (file,rank) = map toLower $ show file ++ show (fromEnum rank + 1)
 
 data Move = Move {
 	moveFrom :: Coors, moveTo :: Coors, moveTakes :: Maybe Coors, movePromote :: Maybe Piece }
@@ -96,12 +96,20 @@ instance Show Move where
 		Just Ü -> "R"
 		Just Ý -> "Q"
 
-moveGen pos@Position{..} = concatMap piece_moves (assocs pBoard) where
+moveGen pos = filter leads_not_to_king_sack $ moveTargets pos
+	where
+	leads_not_to_king_sack move = not $ any king_sack $ moveTargets pos' where
+		pos' = doMove move pos
+		king_sack (Move _ _ (Just takes) _) = case (pBoard pos')!takes of
+			Just (_,Þ) -> True
+			_ -> False
 
+moveTargets pos@Position{..} = concatMap piece_moves (assocs pBoard)
+	where
 	(north,south,east,west) = ((0,1),(0,-1),(1,0),(-1,0))
 	diagonal = [ north+east,north+west,south+east,south+west ]
 	straight = [ north,west,south,east ]
-	piece_moves (from,Just (col,piece)) | col == pColourToMove = filter noKingSack $ case piece of
+	piece_moves (from,Just (col,piece)) | col == pColourToMove = case piece of
 		Ù ->
 			maybe_move from ((Just from) +@ pawn_dir) ++
 			(case (Just from) +@ pawn_dir of
@@ -153,11 +161,6 @@ moveGen pos@Position{..} = concatMap piece_moves (assocs pBoard) where
 	noCheck pos coors = not $ coors `elem` (map moveTo $ moveGen $ pos {
 		pColourToMove = nextColour pColourToMove,
 		pCanCastleQueenSide = [], pCanCastleKingSide = [] })
-
-	noKingSack move = noCheck pos' kings_coors
-		where
-		pos' = doMove move pos
-		[ kings_coors ] = [ coors | (coors,Just (col,Þ)) <- assocs (pb pos'), col==pColourToMove ]
 
 pb x = pBoard x
 
