@@ -111,11 +111,10 @@ moveTargets pos@Position{..} = concatMap piece_moves (assocs pBoard)
 	diagonal = [ north+east,north+west,south+east,south+west ]
 	straight = [ north,west,south,east ]
 	piece_moves (from,Just (col,piece)) | col == pColourToMove = case piece of
-		Ù ->
-			maybe_move from ((Just from) +@ pawn_dir) ++
+		Ù -> maybe_move from ((Just from) +@ pawn_dir) ++
 			(case (Just from) +@ pawn_dir of
 				Just to -> case pBoard!to of
-					Nothing -> maybe_move from ((Just from) +@ 2*pawn_dir)
+					Nothing | snd from == pawn_row -> maybe_move from ((Just from) +@ 2*pawn_dir)
 					_ -> []) ++
 			concat [ maybe_take from ((Just from) +@ (pawn_dir+eastwest)) | eastwest <- [east,west] ]
 		Ú -> concatMap (try_move_to from) [ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
@@ -123,7 +122,7 @@ moveTargets pos@Position{..} = concatMap piece_moves (assocs pBoard)
 		Ü -> concatMap (rec_move 1 from) straight
 		Ý -> concatMap (rec_move 1 from) (diagonal++straight)
 		Þ -> concatMap (try_move_to from) (diagonal++straight) ++
-			try_castle_kingside -- ++ try_castle_quenside
+			try_castle_kingside ++ try_castle_queenside
 	piece_moves _ = []
 
 	pawn_dir = if pColourToMove == White then north else south
@@ -137,46 +136,58 @@ moveTargets pos@Position{..} = concatMap piece_moves (assocs pBoard)
 	try_move_to from δ = maybe_move from ((Just from) +@ δ) ++ maybe_take from ((Just from) +@ δ)
 
 	maybe_take from (Just to) = case pBoard!to of
-		Just (col,_) | col /= pColourToMove -> [ Move from to (Just to) promo | promo <- promotions to ]
+		Just (col,_) | col /= pColourToMove   -> [ Move from to (Just to) promo | promo <- promotions from to ]
+		Nothing | pEnPassantSquare == Just to -> [ Move from to ep_pawn Nothing ] where
+			ep_pawn = pEnPassantSquare +@ ( if pColourToMove==White then south else north )
 		_ -> []
 	maybe_take _ _ = []
 	maybe_move from (Just to) = case pBoard!to of
-		Nothing -> [ Move from to Nothing promo | promo <- promotions to ]
+		Nothing -> [ Move from to Nothing promo | promo <- promotions from to ]
 		_ -> []
 	maybe_move _ _ = []
 
-	promotions to = case to of
-		(_,Eighth) | pColourToMove==White -> map Just [Ú,Û,Ü,Ý]
-		(_,First)  | pColourToMove==Black -> map Just [Ú,Û,Ü,Ý]
+	promotions from to = case (pBoard!from,to) of
+		(Just (_,Ù),(_,Eighth)) | pColourToMove==White -> map Just [Ú,Û,Ü,Ý]
+		(Just (_,Ù),(_,First))  | pColourToMove==Black -> map Just [Ú,Û,Ü,Ý]
 		_ -> [ Nothing ]
 
 	try_castle_kingside = if
 		pColourToMove `elem` pCanCastleKingSide &&
 		isEmpty (F,base_row) && isEmpty (G,base_row) &&
-		noCheck pos (E,base_row) && noCheck pos (F,base_row) && noCheck pos (G,base_row) then
+		noCheck (E,base_row) && noCheck (F,base_row) && noCheck (G,base_row) then
 		[ Move (E,base_row) (G,base_row) Nothing Nothing ] else []
 
-	base_row = if pColourToMove == White then First else Eighth 
+	try_castle_queenside = if
+		pColourToMove `elem` pCanCastleQueenSide &&
+		isEmpty (D,base_row) && isEmpty (C,base_row) && isEmpty (B,base_row) &&
+		noCheck (E,base_row) && noCheck (D,base_row) && noCheck (C,base_row) then
+		[ Move (E,base_row) (C,base_row) Nothing Nothing ] else []
+
+	(base_row,pawn_row) = if pColourToMove == White then (First,Second) else (Eighth,Seventh)
 	isEmpty coors = isNothing (pBoard!coors)
 	
-	noCheck pos coors = not $ coors `elem` (map moveTo $ moveGen $ pos {
+	noCheck coors = not $ coors `elem` (map moveTo $ moveGen $ pos {
 		pColourToMove = nextColour pColourToMove,
 		pCanCastleQueenSide = [], pCanCastleKingSide = [] })
-
-pb x = pBoard x
 
 doMove Move{..} Position{..} = Position {
 	pBoard				= pBoard // ( mb_take ++ move moveFrom moveTo ++ mb_castling ),
 	pColourToMove       = nextColour pColourToMove,
 	pCanCastleQueenSide = (if no_castling_queenside_any_more then delete pColourToMove else id) pCanCastleQueenSide,
 	pCanCastleKingSide  = (if no_castling_kingside_any_more  then delete pColourToMove else id) pCanCastleKingSide,
-	pEnPassantSquare    = Nothing,
+	pEnPassantSquare    = case (moved_piece,moveFrom,moveTo) of
+		(Ù,(file,Second), (_,Fourth)) -> Just (file,Third)
+		(Ù,(file,Seventh),(_,Fifth )) -> Just (file,Sixth)
+		_ -> Nothing,
 	pHalfmoveClock      = if isJust moveTakes || moved_piece==Ù then 0 else pHalfmoveClock+1,
 	pMoveCounter        = pMoveCounter + 1 }
 
 	where
 
-	move from to = [ (from,Nothing), (to,pBoard!from) ]
+	move from to = [ (from,Nothing), (to,target_piece) ] where
+		target_piece = case movePromote of
+			Nothing    -> pBoard!from
+			Just piece -> Just (pColourToMove,piece)
 
 	mb_take = case moveTakes of
 		Nothing    -> []
