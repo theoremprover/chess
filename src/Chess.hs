@@ -166,7 +166,7 @@ moveTargets pos@Position{..} = concatMap piece_moves (assocs pBoard)
 	(base_row,pawn_row) = if pColourToMove == White then (First,Second) else (Eighth,Seventh)
 	isEmpty coors = isNothing (pBoard!coors)
 	
-	noCheck coors = not $ coors `elem` (map moveTo $ moveGen $ pos {
+	noCheck coors = not $ coors `elem` (map moveTo $ moveTargets $ pos {
 		pColourToMove = nextColour pColourToMove,
 		pCanCastleQueenSide = [], pCanCastleKingSide = [] })
 
