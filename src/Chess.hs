@@ -141,6 +141,7 @@ moveTargets pos@Position{..} = concatMap piece_moves (assocs pBoard)
 			ep_pawn = pEnPassantSquare +@ ( if pColourToMove==White then south else north )
 		_ -> []
 	maybe_take _ _ = []
+
 	maybe_move from (Just to) = case pBoard!to of
 		Nothing -> [ Move from to Nothing promo | promo <- promotions from to ]
 		_ -> []
@@ -207,6 +208,26 @@ doMove Move{..} Position{..} = Position {
 		((H,Eighth),Black) -> (False,True )
 		((A,Eighth),Black) -> (True ,False)
 		_                  -> (False,False)
+
+rate Position{..} = sum [ (if colour==White then 1 else -1) * piece_val |
+	(coors@(file,rank),Just (colour,piece)) <- assocs pBoard,
+	piece_val = case piece of
+		Ù -> 1 + case distance coors (file,pawn_target_rank colour) of
+			1 -> 4
+			2 -> 2
+			_ -> 0
+		Ú -> 3 + commanded_squares coors
+		Û -> 3 + commanded_squares coors
+		Ü -> 5 + commanded_squares coors
+		Ý -> 9 + commanded_squares coors
+		Þ -> 0,
+
+	where
+	distance (file1,rank1) (file2,rank2) =
+		max (abs (fromEnum file1 - fromEnum file2)) (abs (fromEnum rank1 - fromEnum rank2))
+	pawn_target_rank White = Eighth
+	pawn_target_rank Black = First
+	commanded_squares coors = min ***CONTINUEHERE***
 
 main = do
 	loop [initialPosition]
