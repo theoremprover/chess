@@ -9,6 +9,7 @@ import Data.Char
 import Data.List
 import Data.Tuple
 import Data.NumInstances
+import System.Random
 
 data Piece = Ù | Ú | Û | Ü | Ý | Þ deriving (Show,Eq,Enum)
 data Colour = White | Black deriving (Show,Eq,Enum)
@@ -96,14 +97,13 @@ instance Show Move where
 		Just Ü -> "R"
 		Just Ý -> "Q"
 
-moveGen pos = filter leads_not_to_king_sack $ moveTargets pos
-	where
-	leads_not_to_king_sack move = not $ any king_sack $ moveTargets pos' where
-		pos' = doMove move pos
-		king_sack (Move _ _ (Just takes) _) = case (pBoard pos')!takes of
-			Just (_,Þ) -> True
-			_ -> False
-		king_sack _ = False
+moveGen pos = filter (no_check . doMove pos) $ moveTargets pos
+
+no_check pos = not $ any king_sack $ moveTargets pos where
+	king_sack (Move _ _ (Just takes) _) = case (pBoard pos)!takes of
+		Just (_,Þ) -> True
+		_ -> False
+	king_sack _ = False
 
 moveTargets pos@Position{..} = concatMap piece_moves (assocs pBoard)
 	where
@@ -167,11 +167,9 @@ moveTargets pos@Position{..} = concatMap piece_moves (assocs pBoard)
 	(base_row,pawn_row) = if pColourToMove == White then (First,Second) else (Eighth,Seventh)
 	isEmpty coors = isNothing (pBoard!coors)
 	
-	noCheck coors = not $ coors `elem` (map moveTo $ moveTargets $ pos {
-		pColourToMove = nextColour pColourToMove,
-		pCanCastleQueenSide = [], pCanCastleKingSide = [] })
+	noCheck coors = no_check $ pos { pBoard = pBoard // [(coors,Just (pColourToMove,Þ))] }
 
-doMove Move{..} Position{..} = Position {
+doMove Position{..} Move{..} = Position {
 	pBoard				= pBoard // ( mb_take ++ move moveFrom moveTo ++ mb_castling ),
 	pColourToMove       = nextColour pColourToMove,
 	pCanCastleQueenSide = (if no_castling_queenside_any_more then delete pColourToMove else id) pCanCastleQueenSide,
@@ -209,25 +207,35 @@ doMove Move{..} Position{..} = Position {
 		((A,Eighth),Black) -> (True ,False)
 		_                  -> (False,False)
 
-rate Position{..} = sum [ (if colour==White then 1 else -1) * piece_val |
-	(coors@(file,rank),Just (colour,piece)) <- assocs pBoard,
-	piece_val = case piece of
-		Ù -> 1 + case distance coors (file,pawn_target_rank colour) of
+type Rating = Float
+wHITE_MATE = -10000.0 :: Float
+bLACK_MATE =  10000.0 :: Float
+dRAW       =      0.0 :: Float
+sTALEMATE  = dRAW
+
+rate :: Position -> Rating
+rate Position{..} | pHalfmoveClock >= 50 = dRAW
+rate pos | null (moveGen pos) = case no_check pos of
+	False -> if pColourToMove pos == White then wHITE_MATE else bLACK_MATE
+	True -> sTALEMATE
+rate pos = 0.1*mobility + sum [ (if colour==White then 1 else -1) * piece_val |
+	(coors@(file,rank),Just (colour,piece)) <- assocs (pBoard pos),
+	let piece_val = case piece of
+		Ù -> 1 + case distance coors (file,if colour==White then Eighth else First) of
 			1 -> 4
 			2 -> 2
 			_ -> 0
-		Ú -> 3 + commanded_squares coors
-		Û -> 3 + commanded_squares coors
-		Ü -> 5 + commanded_squares coors
-		Ý -> 9 + commanded_squares coors
-		Þ -> 0,
-
+		Ú -> 3
+		Û -> 3
+		Ü -> 5
+		Ý -> 9
+		Þ -> 0 ]
 	where
 	distance (file1,rank1) (file2,rank2) =
 		max (abs (fromEnum file1 - fromEnum file2)) (abs (fromEnum rank1 - fromEnum rank2))
-	pawn_target_rank White = Eighth
-	pawn_target_rank Black = First
-	commanded_squares coors = min ***CONTINUEHERE***
+	mobility :: Rating
+	mobility = fromIntegral $ length (moveTargets pos) -
+		length (moveTargets (pos { pColourToMove = nextColour (pColourToMove pos) }))
 
 main = do
 	loop [initialPosition]
@@ -239,10 +247,28 @@ loop poss@(pos:lastpos) = do
 	putStr "> "
 	s <- getLine
 	case s of
+		"random" -> randomMatch pos
 		"q" -> return ()
+		"r" -> do
+			putStrLn $ "Rating: " ++ show (rate pos)
+			loop poss
 		"b" -> loop lastpos
 		m -> case filter ((m==).snd) (zip moves (map show moves)) of
 			[] -> do
 				putStrLn "No move."
 				loop poss
-			[(move,_)] -> loop (doMove move pos : poss)
+			[(move,_)] -> loop (doMove pos move : poss)
+	where
+	randomMatch pos = do
+		let moves = moveGen pos
+		case moves of
+			[] -> do
+				putStrLn "Game over"
+			_ -> do
+				r <- randomIO
+				let move = moves!!(mod r (length moves))
+				putStrLn $ "Moving " ++ show move
+				let pos' = doMove pos move
+				print pos'
+				randomMatch pos'
+		
