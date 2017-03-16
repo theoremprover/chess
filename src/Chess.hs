@@ -90,20 +90,46 @@ data Move = Move {
 	moveFrom :: Coors, moveTo :: Coors, moveTakes :: Maybe Coors, movePromote :: Maybe Piece }
 	deriving Eq
 instance Show Move where
-	show Move{..} = show moveFrom ++ (if isJust moveTakes then "x" else "") ++ show moveTo ++ case movePromote of
+	show Move{..} = show moveFrom ++ show moveTo ++ case movePromote of
 		Nothing -> ""
 		Just Ú -> "N"
 		Just Û -> "B"
 		Just Ü -> "R"
 		Just Ý -> "Q"
 
-moveGen pos = filter (no_check . doMove pos) $ moveTargets pos
+moveIsCastling Position{..} Move{..} = case (pBoard!moveFrom,moveFrom,moveTo) of
+	(Just (col,Þ),(E,_),(G,_)) -> Just (Right col)
+	(Just (col,Þ),(E,_),(C,_)) -> Just (Left col)
+	_ -> Nothing
 
-no_check pos = not $ any king_sack $ moveTargets pos where
-	king_sack (Move _ _ (Just takes) _) = case (pBoard pos)!takes of
-		Just (_,Þ) -> True
-		_ -> False
-	king_sack _ = False
+moveGen pos = filter (.doMove pos) $ moveTargets pos
+
+----------
+
+
+
+--###########
+
+in_check pos colour_to_move = coors_in_check (kings_coors pos colour_to_move) pos colour_to_move
+
+kings_coors pos colour_to_move = head
+	[ coors | (coors,Just (col,Þ)) <- assocs (pBoard pos'), col == pColourToMove pos ]
+
+no_check_after_move :: Position -> Move -> Bool
+no_check_after_move pos move = not $ any (coors_in_check.simulate_move) $ moveTargets pos'
+	where
+	simulate_move move = (doMove pos move,pColourToMove pos,move)
+	pos' = doMove pos move
+	unchecked :: [Coors]
+	unchecked = case moveIsCastling pos move of
+		Just (Left White) ->  [(E,First), (D,First), (C,First)]
+		Just (Right White) -> [(E,First), (F,First), (G,First)]
+		Just (Left Black) ->  [(E,Eighth),(D,Eighth),(C,Eighth)]
+		Just (Right Black) -> [(E,Eighth),(F,Eighth),(G,Eighth)]
+		Nothing -> [ kings_coors pos' (pColourToMove pos) ]
+
+coors_in_check (pos,colour_to_move,coors) =
+--------
 
 moveTargets pos@Position{..} = concatMap piece_moves (assocs pBoard)
 	where
@@ -122,7 +148,14 @@ moveTargets pos@Position{..} = concatMap piece_moves (assocs pBoard)
 		Ü -> concatMap (rec_move 1 from) straight
 		Ý -> concatMap (rec_move 1 from) (diagonal++straight)
 		Þ -> concatMap (try_move_to from) (diagonal++straight) ++
-			try_castle_kingside ++ try_castle_queenside
+			if
+				pColourToMove `elem` pCanCastleKingSide &&
+				isEmpty (F,base_row) && isEmpty (G,base_row) then
+				[ Move (E,base_row) (G,base_row) Nothing Nothing ] else []
+			++
+			if pColourToMove `elem` pCanCastleQueenSide &&
+				isEmpty (D,base_row) && isEmpty (C,base_row) && isEmpty (B,base_row) then
+				[ Move (E,base_row) (C,base_row) Nothing Nothing ] else []
 	piece_moves _ = []
 
 	pawn_dir = if pColourToMove == White then north else south
@@ -152,23 +185,9 @@ moveTargets pos@Position{..} = concatMap piece_moves (assocs pBoard)
 		(Just (_,Ù),(_,First))  | pColourToMove==Black -> map Just [Ú,Û,Ü,Ý]
 		_ -> [ Nothing ]
 
-	try_castle_kingside = if
-		pColourToMove `elem` pCanCastleKingSide &&
-		isEmpty (F,base_row) && isEmpty (G,base_row) &&
-		noCheck (E,base_row) && noCheck (F,base_row) && noCheck (G,base_row) then
-		[ Move (E,base_row) (G,base_row) Nothing Nothing ] else []
-
-	try_castle_queenside = if
-		pColourToMove `elem` pCanCastleQueenSide &&
-		isEmpty (D,base_row) && isEmpty (C,base_row) && isEmpty (B,base_row) &&
-		noCheck (E,base_row) && noCheck (D,base_row) && noCheck (C,base_row) then
-		[ Move (E,base_row) (C,base_row) Nothing Nothing ] else []
-
 	(base_row,pawn_row) = if pColourToMove == White then (First,Second) else (Eighth,Seventh)
 	isEmpty coors = isNothing (pBoard!coors)
 	
-	noCheck coors = no_check $ pos { pBoard = pBoard // [(coors,Just (pColourToMove,Þ))] }
-
 doMove Position{..} Move{..} = Position {
 	pBoard				= pBoard // ( mb_take ++ move moveFrom moveTo ++ mb_castling ),
 	pColourToMove       = nextColour pColourToMove,
@@ -215,7 +234,7 @@ sTALEMATE  = dRAW
 
 rate :: Position -> Rating
 rate Position{..} | pHalfmoveClock >= 50 = dRAW
-rate pos | null (moveGen pos) = case no_check pos of
+rate pos | null (moveGen pos) = case in_check pos of
 	False -> if pColourToMove pos == White then wHITE_MATE else bLACK_MATE
 	True -> sTALEMATE
 rate pos = 0.1*mobility + sum [ (if colour==White then 1 else -1) * piece_val |
