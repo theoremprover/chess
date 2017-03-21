@@ -11,8 +11,8 @@ import Data.Tuple
 import Data.NumInstances
 import System.Random
 
-data Piece = Ù | Ú | Û | Ü | Ý | Þ deriving (Show,Eq,Enum)
-data Colour = White | Black deriving (Show,Eq,Enum)
+data Piece = Ù | Ú | Û | Ü | Ý | Þ deriving (Show,Eq,Enum,Ord)
+data Colour = White | Black deriving (Show,Eq,Enum,Ord)
 nextColour White = Black
 nextColour Black = White
 data File = A | B | C | D | E | F | G | H
@@ -102,34 +102,38 @@ moveIsCastling Position{..} Move{..} = case (pBoard!moveFrom,moveFrom,moveTo) of
 	(Just (col,Þ),(E,_),(C,_)) -> Just (Left col)
 	_ -> Nothing
 
-moveGen pos = filter (.doMove pos) $ moveTargets pos
+moveGen pos = filter (legal_move_wrt_check pos) $ moveTargets pos
 
-----------
+-- is colour's move igoring check?
+legal_move_wrt_check pos move = all (coors_not_in_check pos (pColourToMove pos)) $ case moveIsCastling pos move of
+	Just (Left White) ->  [(E,First), (D,First), (C,First)]
+	Just (Right White) -> [(E,First), (F,First), (G,First)]
+	Just (Left Black) ->  [(E,Eighth),(D,Eighth),(C,Eighth)]
+	Just (Right Black) -> [(E,Eighth),(F,Eighth),(G,Eighth)]
+	Nothing -> [ kings_coors (doMove pos move) (pColourToMove pos) ]
 
+-- Checks is the player to move is in check
+no_check pos = coors_not_in_check pos colour (kings_coors pos colour) where
+	colour = pColourToMove pos
 
+-- Coors of colour's king
+kings_coors pos colour = head [ coors | (coors,Just (col,Þ)) <- assocs (pBoard pos), col == colour ]
 
---###########
+-- Checks if colour's coors are threatened by the other player
+coors_not_in_check pos colour coors = all ((/=coors).moveTo) moves
+	where
+	board' = pBoard pos // [ (coors,Just (colour,Þ)) ] -- Place a figure on the square to also get pawn takes
+	moves = moveTargets $ pos { pColourToMove = nextColour (pColourToMove pos), pBoard = board' }
 
-in_check pos colour_to_move = coors_in_check (kings_coors pos colour_to_move) pos colour_to_move
+{--###########
 
-kings_coors pos colour_to_move = head
-	[ coors | (coors,Just (col,Þ)) <- assocs (pBoard pos'), col == pColourToMove pos ]
+-- Che
 
 no_check_after_move :: Position -> Move -> Bool
-no_check_after_move pos move = not $ any (coors_in_check.simulate_move) $ moveTargets pos'
-	where
-	simulate_move move = (doMove pos move,pColourToMove pos,move)
-	pos' = doMove pos move
-	unchecked :: [Coors]
-	unchecked = case moveIsCastling pos move of
-		Just (Left White) ->  [(E,First), (D,First), (C,First)]
-		Just (Right White) -> [(E,First), (F,First), (G,First)]
-		Just (Left Black) ->  [(E,Eighth),(D,Eighth),(C,Eighth)]
-		Just (Right Black) -> [(E,Eighth),(F,Eighth),(G,Eighth)]
-		Nothing -> [ kings_coors pos' (pColourToMove pos) ]
 
 coors_in_check (pos,colour_to_move,coors) =
---------
+
+--------}
 
 moveTargets pos@Position{..} = concatMap piece_moves (assocs pBoard)
 	where
@@ -234,9 +238,10 @@ sTALEMATE  = dRAW
 
 rate :: Position -> Rating
 rate Position{..} | pHalfmoveClock >= 50 = dRAW
-rate pos | null (moveGen pos) = case in_check pos of
+rate pos | null (moveGen pos) = case no_check pos of
 	False -> if pColourToMove pos == White then wHITE_MATE else bLACK_MATE
 	True -> sTALEMATE
+rate pos | max_one_light_figure pos = dRAW
 rate pos = 0.1*mobility + sum [ (if colour==White then 1 else -1) * piece_val |
 	(coors@(file,rank),Just (colour,piece)) <- assocs (pBoard pos),
 	let piece_val = case piece of
@@ -255,6 +260,13 @@ rate pos = 0.1*mobility + sum [ (if colour==White then 1 else -1) * piece_val |
 	mobility :: Rating
 	mobility = fromIntegral $ length (moveTargets pos) -
 		length (moveTargets (pos { pColourToMove = nextColour (pColourToMove pos) }))
+
+max_one_light_figure Position{..} = case sort $ catMaybes $ elems pBoard of
+	[(White,Þ),(Black,Þ)]                                                   -> True
+	[(_,fig),(White,Þ),(Black,Þ)]             | light_figures [fig]         -> True
+	[(_,fig_w),(White,Þ),(_,fig_b),(Black,Þ)] | light_figures [fig_w,fig_b] -> True
+	where
+	light_figures = all (`elem` [Ú,Û])
 
 main = do
 	loop [initialPosition]
@@ -278,6 +290,8 @@ loop poss@(pos:lastpos) = do
 				loop poss
 			[(move,_)] -> loop (doMove pos move : poss)
 	where
+	randomMatch pos = case (rate pos) `elem` [dRAW,] of
+		dRAW
 	randomMatch pos = do
 		let moves = moveGen pos
 		case moves of
