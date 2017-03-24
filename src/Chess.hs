@@ -5,6 +5,7 @@ module Main where
 import Data.Array
 import Data.Maybe
 import Data.Ix
+import Data.Ord
 import Data.Char
 import Data.List
 import Data.Tuple
@@ -35,6 +36,22 @@ data Position = Position {
 
 initialPosition = Position {
 	pBoard = boardFromString [
+{-
+		"ØçØçäçØç",
+		"çØçØèØçØ",
+		"ØçØíØçØç",
+		"çØçØçØçØ",
+		"ØçØçØçØç",
+		"çØçØçØçØ",
+		"ØçØçØçØç",
+		"çØçØçØçØ" ],
+	pColourToMove       = White,
+	pCanCastleQueenSide = [],
+	pCanCastleKingSide  = [],
+	pEnPassantSquare    = Nothing,
+	pHalfmoveClock      = 0,
+	pMoveCounter        = 0 }
+-}
 		"âïáòäðàñ",
 		"îßîßîßîß",
 		"ØçØçØçØç",
@@ -52,9 +69,11 @@ initialPosition = Position {
 
 boardFromString s = listArray ((A,First),(H,Eighth)) $ map to_fig $ concat $ map reverse $ transpose s
 	where
-	to_fig c_rep = case if c_rep < 'ç' then c_rep else chr $ ord c_rep - ord 'ç' + ord 'Ø' of
+	to_fig c_rep = case c_rep of
 		c | c `elem` "ÙÚÛÜÝÞ" -> Just (White,toEnum (ord c - ord 'Ù'))
 		c | c `elem` "ßàáâãä" -> Just (Black,toEnum (ord c - ord 'ß'))
+		c | c `elem` "èéêëìí" -> Just (White,toEnum (ord c - ord 'è'))
+		c | c `elem` "îïðñòó" -> Just (Black,toEnum (ord c - ord 'î'))
 		_ -> Nothing
 
 instance Show Position where
@@ -67,7 +86,8 @@ instance Show Position where
 		show_rank rank = [ "ÇÈÉÊËÌÍÎ" !! fromEnum rank ] ++
 			map (show_square rank) [A .. H] ++ "Ã"
 		show_square rank file = case pBoard!(file,rank) of
-				Nothing -> if darksquare then 'ç' else 'Ø'
+				Nothing            | darksquare -> 'ç'
+				Nothing                         -> 'Ø'
 				Just (White,piece) | darksquare -> "èéêëìí" !! (fromEnum piece)
 				Just (White,piece)              -> "ÙÚÛÜÝÞ" !! (fromEnum piece)
 				Just (Black,piece) | darksquare -> "îïðñòó" !! (fromEnum piece)
@@ -105,12 +125,14 @@ moveIsCastling Position{..} Move{..} = case (pBoard!moveFrom,moveFrom,moveTo) of
 moveGen pos = filter (legal_move_wrt_check pos) $ moveTargets pos
 
 -- is colour's move igoring check?
-legal_move_wrt_check pos move = all (coors_not_in_check pos (pColourToMove pos)) $ case moveIsCastling pos move of
-	Just (Left White) ->  [(E,First), (D,First), (C,First)]
-	Just (Right White) -> [(E,First), (F,First), (G,First)]
+legal_move_wrt_check pos move = all (coors_not_in_check pos' (pColourToMove pos)) $ case moveIsCastling pos move of
+	Just (Left White) ->  [(E,First), (D,First), (C,First) ]
+	Just (Right White) -> [(E,First), (F,First), (G,First) ]
 	Just (Left Black) ->  [(E,Eighth),(D,Eighth),(C,Eighth)]
 	Just (Right Black) -> [(E,Eighth),(F,Eighth),(G,Eighth)]
-	Nothing -> [ kings_coors (doMove pos move) (pColourToMove pos) ]
+	Nothing -> [ kings_coors pos' (pColourToMove pos) ]
+	where
+	pos' = doMove pos move
 
 -- Checks is the player to move is in check
 no_check pos = coors_not_in_check pos colour (kings_coors pos colour) where
@@ -123,17 +145,7 @@ kings_coors pos colour = head [ coors | (coors,Just (col,Þ)) <- assocs (pBoard 
 coors_not_in_check pos colour coors = all ((/=coors).moveTo) moves
 	where
 	board' = pBoard pos // [ (coors,Just (colour,Þ)) ] -- Place a figure on the square to also get pawn takes
-	moves = moveTargets $ pos { pColourToMove = nextColour (pColourToMove pos), pBoard = board' }
-
-{--###########
-
--- Che
-
-no_check_after_move :: Position -> Move -> Bool
-
-coors_in_check (pos,colour_to_move,coors) =
-
---------}
+	moves = moveTargets $ pos { pColourToMove = nextColour colour, pBoard = board' }
 
 moveTargets pos@Position{..} = concatMap piece_moves (assocs pBoard)
 	where
@@ -192,7 +204,7 @@ moveTargets pos@Position{..} = concatMap piece_moves (assocs pBoard)
 	(base_row,pawn_row) = if pColourToMove == White then (First,Second) else (Eighth,Seventh)
 	isEmpty coors = isNothing (pBoard!coors)
 	
-doMove Position{..} Move{..} = Position {
+doMove pos@Position{..} mov@Move{..} = Position {
 	pBoard				= pBoard // ( mb_take ++ move moveFrom moveTo ++ mb_castling ),
 	pColourToMove       = nextColour pColourToMove,
 	pCanCastleQueenSide = (if no_castling_queenside_any_more then delete pColourToMove else id) pCanCastleQueenSide,
@@ -236,14 +248,19 @@ bLACK_MATE =  10000.0 :: Float
 dRAW       =      0.0 :: Float
 sTALEMATE  = dRAW
 
-rate :: Position -> Rating
-rate Position{..} | pHalfmoveClock >= 50 = dRAW
+data Reason = Fifty_Halfmoves | Stalemate | NoWinPossible | Agreed deriving (Eq,Show,Ord)
+data MatchResult = Winner Colour | Draw Reason deriving (Eq,Show,Ord)
+
+rate :: Position -> (Rating,Maybe MatchResult)
+rate Position{..} | pHalfmoveClock >= 50 = (dRAW,Just $ Draw Fifty_Halfmoves)
 rate pos | null (moveGen pos) = case no_check pos of
-	False -> if pColourToMove pos == White then wHITE_MATE else bLACK_MATE
-	True -> sTALEMATE
-rate pos | max_one_light_figure pos = dRAW
-rate pos = 0.1*mobility + sum [ (if colour==White then 1 else -1) * piece_val |
-	(coors@(file,rank),Just (colour,piece)) <- assocs (pBoard pos),
+	False -> case pColourToMove pos of
+		White -> (wHITE_MATE,Just $ Winner Black)
+		Black -> (bLACK_MATE,Just $ Winner White)
+	True -> (sTALEMATE,Just $ Draw Stalemate)
+rate pos | max_one_light_figure pos = (dRAW,Just $ Draw NoWinPossible)
+rate pos = (0.1*mobility + sum [ (if colour==White then 1 else -1) * piece_val |
+	(coors@(file,_),Just (colour,piece)) <- assocs (pBoard pos),
 	let piece_val = case piece of
 		Ù -> 1 + case distance coors (file,if colour==White then Eighth else First) of
 			1 -> 4
@@ -253,7 +270,7 @@ rate pos = 0.1*mobility + sum [ (if colour==White then 1 else -1) * piece_val |
 		Û -> 3
 		Ü -> 5
 		Ý -> 9
-		Þ -> 0 ]
+		Þ -> 0 ],Nothing)
 	where
 	distance (file1,rank1) (file2,rank2) =
 		max (abs (fromEnum file1 - fromEnum file2)) (abs (fromEnum rank1 - fromEnum rank2))
@@ -261,10 +278,11 @@ rate pos = 0.1*mobility + sum [ (if colour==White then 1 else -1) * piece_val |
 	mobility = fromIntegral $ length (moveTargets pos) -
 		length (moveTargets (pos { pColourToMove = nextColour (pColourToMove pos) }))
 
-max_one_light_figure Position{..} = case sort $ catMaybes $ elems pBoard of
-	[(White,Þ),(Black,Þ)]                                                   -> True
-	[(_,fig),(White,Þ),(Black,Þ)]             | light_figures [fig]         -> True
-	[(_,fig_w),(White,Þ),(_,fig_b),(Black,Þ)] | light_figures [fig_w,fig_b] -> True
+max_one_light_figure Position{..} = case sort $ filter ((==Þ).snd) $ catMaybes $ elems pBoard of
+	[]                                                                    -> True
+	[(_,fig)]                 | light_figures [fig]                       -> True
+	[(col1,fig1),(col2,fig2)] | light_figures [fig1,fig2] && col1 /= col2 -> True
+	_                                                                     -> False
 	where
 	light_figures = all (`elem` [Ú,Û])
 
@@ -272,36 +290,41 @@ main = do
 	loop [initialPosition]
 
 loop poss@(pos:lastpos) = do
-	print pos
-	let moves = moveGen pos
-	print moves
-	putStr "> "
-	s <- getLine
-	case s of
-		"random" -> randomMatch pos
-		"q" -> return ()
-		"r" -> do
-			putStrLn $ "Rating: " ++ show (rate pos)
-			loop poss
-		"b" -> loop lastpos
-		m -> case filter ((m==).snd) (zip moves (map show moves)) of
-			[] -> do
-				putStrLn "No move."
-				loop poss
-			[(move,_)] -> loop (doMove pos move : poss)
-	where
-	randomMatch pos = case (rate pos) `elem` [dRAW,] of
-		dRAW
-	randomMatch pos = do
-		let moves = moveGen pos
-		case moves of
-			[] -> do
-				putStrLn "Game over"
-			_ -> do
-				r <- randomIO
-				let move = moves!!(mod r (length moves))
-				putStrLn $ "Moving " ++ show move
-				let pos' = doMove pos move
-				print pos'
-				randomMatch pos'
+	case rate pos of
+		(_,Just matchresult) -> print matchresult
+		(rating,Nothing) -> do
+			print pos
+			print moves
+			get_input
+			where
+			moves = moveGen pos
+			get_input = do
+				putStr "> "
+				s <- getLine
+				case s of
+					"i" -> loop [initialPosition] 
+					"random" -> randomMatch pos
+					"q" -> return ()
+					"r" -> do
+						putStrLn $ "Rating: " ++ show (rate pos)
+						loop poss
+					"b" -> loop lastpos
+					m -> case filter ((m==).snd) (zip moves (map show moves)) of
+						[] -> do
+							putStrLn "No move."
+							get_input
+						[(move,_)] -> loop (doMove pos move : poss)
+
+			randomMatch pos = case rate pos of
+				(_,Just ending) -> print ending
+				(rating,Nothing) -> do
+					putStrLn $ "Rating=" ++ show rating
+					let moves = (if pColourToMove pos == White then reverse else id) $
+						sortBy (comparing fst) $ map (\ m -> (rate $ doMove pos m,m)) $ moveGen pos
+					r <- randomIO
+					let (_,move) = moves!!(mod r $ min 5 (length moves))
+					putStrLn $ "Moving " ++ show move
+					let pos' = doMove pos move
+					print pos'
+					randomMatch pos'
 		
