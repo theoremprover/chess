@@ -286,6 +286,13 @@ max_one_light_figure Position{..} = case sort $ filter ((/=Þ).snd) $ catMaybes 
 	where
 	light_figures = all (`elem` [Ú,Û])
 
+search        0 line pos = (fst $ rate pos,line)
+search maxdepth line pos = (best_rating,
+	where
+	minimax = if pColourToMove pos == White then maximum else minimum
+	(best_rating,best_line) = minimax continuations
+	continuations = map (\ move -> search (move:line) (maxdepth-1) (doMove pos move)) $ moveGen moves
+
 main = do
 	loop [initialPosition]
 
