@@ -249,14 +249,14 @@ dRAW       =      0.0 :: Float
 sTALEMATE  = dRAW
 
 data Reason = Fifty_Halfmoves | Stalemate | NoWinPossible | Agreed deriving (Eq,Show,Ord)
-data MatchResult = Winner Colour | Draw Reason deriving (Eq,Show,Ord)
+data MatchResult = Mate_Winner Colour | Draw Reason deriving (Eq,Show,Ord)
 
 rate :: Position -> (Rating,Maybe MatchResult)
 rate Position{..} | pHalfmoveClock >= 50 = (dRAW,Just $ Draw Fifty_Halfmoves)
 rate pos | null (moveGen pos) = case no_check pos of
 	False -> case pColourToMove pos of
-		White -> (wHITE_MATE,Just $ Winner Black)
-		Black -> (bLACK_MATE,Just $ Winner White)
+		White -> (wHITE_MATE,Just $ Mate_Winner Black)
+		Black -> (bLACK_MATE,Just $ Mate_Winner White)
 	True -> (sTALEMATE,Just $ Draw Stalemate)
 rate pos | max_one_light_figure pos = (dRAW,Just $ Draw NoWinPossible)
 rate pos = (0.1*mobility + sum [ (if colour==White then 1 else -1) * piece_val |
@@ -278,7 +278,7 @@ rate pos = (0.1*mobility + sum [ (if colour==White then 1 else -1) * piece_val |
 	mobility = fromIntegral $ length (moveTargets pos) -
 		length (moveTargets (pos { pColourToMove = nextColour (pColourToMove pos) }))
 
-max_one_light_figure Position{..} = case sort $ filter ((==Þ).snd) $ catMaybes $ elems pBoard of
+max_one_light_figure Position{..} = case sort $ filter ((/=Þ).snd) $ catMaybes $ elems pBoard of
 	[]                                                                    -> True
 	[(_,fig)]                 | light_figures [fig]                       -> True
 	[(col1,fig1),(col2,fig2)] | light_figures [fig1,fig2] && col1 /= col2 -> True
