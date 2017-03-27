@@ -108,7 +108,7 @@ instance Show Coors where
 
 data Move = Move {
 	moveFrom :: Coors, moveTo :: Coors, moveTakes :: Maybe Coors, movePromote :: Maybe Piece }
-	deriving Eq
+	deriving (Eq,Ord)
 instance Show Move where
 	show Move{..} = show moveFrom ++ show moveTo ++ case movePromote of
 		Nothing -> ""
@@ -259,7 +259,7 @@ rate pos | null (moveGen pos) = case no_check pos of
 		Black -> (bLACK_MATE,Just $ Mate_Winner White)
 	True -> (sTALEMATE,Just $ Draw Stalemate)
 rate pos | max_one_light_figure pos = (dRAW,Just $ Draw NoWinPossible)
-rate pos = (0.1*mobility + sum [ (if colour==White then 1 else -1) * piece_val |
+rate pos = (0.1*mobility + sum [ (if colour==White then id else negate) piece_val |
 	(coors@(file,_),Just (colour,piece)) <- assocs (pBoard pos),
 	let piece_val = case piece of
 		Ù -> 1 + case distance coors (file,if colour==White then Eighth else First) of
@@ -286,17 +286,18 @@ max_one_light_figure Position{..} = case sort $ filter ((/=Þ).snd) $ catMaybes 
 	where
 	light_figures = all (`elem` [Ú,Û])
 
-search        0 line pos = (fst $ rate pos,line)
-search maxdepth line pos = (best_rating,
+search     0 line pos = (fst $ rate pos,line)
+search depth line pos = (best_rating,last best_line:line)
 	where
 	minimax = if pColourToMove pos == White then maximum else minimum
 	(best_rating,best_line) = minimax continuations
-	continuations = map (\ move -> search (move:line) (maxdepth-1) (doMove pos move)) $ moveGen moves
+	moves = moveGen pos
+	continuations = map (\ move -> search (depth-1) (move:line) (doMove pos move)) moves 
 
 main = do
-	loop [initialPosition]
+	loop 2 [initialPosition]
 
-loop poss@(pos:lastpos) = do
+loop depth poss@(pos:lastpos) = do
 	case rate pos of
 		(_,Just matchresult) -> print matchresult
 		(rating,Nothing) -> do
@@ -309,18 +310,25 @@ loop poss@(pos:lastpos) = do
 				putStr "> "
 				s <- getLine
 				case s of
-					"i" -> loop [initialPosition] 
+					"i" -> loop depth [initialPosition] 
 					"random" -> randomMatch pos
 					"q" -> return ()
+					"s" -> do
+						let (_,move:_) = search depth [] pos
+						loop depth (doMove pos move : poss)
 					"r" -> do
 						putStrLn $ "Rating: " ++ show (rate pos)
-						loop poss
-					"b" -> loop lastpos
+						loop depth poss
+					"b" -> loop depth lastpos
+					depthstr | all isDigit depthstr -> do
+						let [(depth,"")] = reads depthstr
+						putStrLn $ "Set depth to " ++ show depth
+						loop depth poss
 					m -> case filter ((m==).snd) (zip moves (map show moves)) of
 						[] -> do
 							putStrLn "No move."
 							get_input
-						[(move,_)] -> loop (doMove pos move : poss)
+						[(move,_)] -> loop depth (doMove pos move : poss)
 
 			randomMatch pos = case rate pos of
 				(_,Just ending) -> print ending
