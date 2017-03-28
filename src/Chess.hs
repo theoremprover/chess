@@ -36,22 +36,23 @@ data Position = Position {
 
 initialPosition = Position {
 	pBoard = boardFromString [
-{-
-		"ØçØçäçØç",
-		"çØçØèØçØ",
-		"ØçØíØçØç",
-		"çØçØçØçØ",
+--{-
 		"ØçØçØçØç",
 		"çØçØçØçØ",
+		"ØçØçØíØó",
+		"çØçØçØçØ",
 		"ØçØçØçØç",
-		"çØçØçØçØ" ],
+		"çØçØçØç ",
+		"ØçØçØçØç",
+		"çØçØçØëØ" ],
 	pColourToMove       = White,
 	pCanCastleQueenSide = [],
 	pCanCastleKingSide  = [],
 	pEnPassantSquare    = Nothing,
 	pHalfmoveClock      = 0,
 	pMoveCounter        = 0 }
--}
+-- -}
+{-
 		"âïáòäðàñ",
 		"îßîßîßîß",
 		"ØçØçØçØç",
@@ -66,6 +67,7 @@ initialPosition = Position {
 	pEnPassantSquare    = Nothing,
 	pHalfmoveClock      = 0,
 	pMoveCounter        = 0 }
+-}
 
 boardFromString s = listArray ((A,First),(H,Eighth)) $ map to_fig $ concat $ map reverse $ transpose s
 	where
@@ -278,15 +280,16 @@ rate pos = (0.1*mobility + sum [ (if colour==White then id else negate) piece_va
 	mobility = fromIntegral $ length (moveTargets pos) -
 		length (moveTargets (pos { pColourToMove = nextColour (pColourToMove pos) }))
 
-max_one_light_figure Position{..} = case sort $ filter ((/=Þ).snd) $ catMaybes $ elems pBoard of
-	[]                                                                    -> True
-	[(_,fig)]                 | light_figures [fig]                       -> True
-	[(col1,fig1),(col2,fig2)] | light_figures [fig1,fig2] && col1 /= col2 -> True
-	_                                                                     -> False
-	where
-	light_figures = all (`elem` [Ú,Û])
+	max_one_light_figure Position{..} = case sort $ filter ((/=Þ).snd) $ catMaybes $ elems pBoard of
+		[]                                                                    -> True
+		[(_,fig)]                 | light_figures [fig]                       -> True
+		[(col1,fig1),(col2,fig2)] | light_figures [fig1,fig2] && col1 /= col2 -> True
+		_                                                                     -> False
+		where
+		light_figures = all (`elem` [Ú,Û])
 
 search     0 line pos = (fst $ rate pos,line)
+search     _ line pos | (rating,Just _) <- rate pos = (rating,line)
 search depth line pos = (best_rating,last best_line:line)
 	where
 	minimax = if pColourToMove pos == White then maximum else minimum
@@ -299,47 +302,49 @@ main = do
 
 loop depth poss@(pos:lastpos) = do
 	case rate pos of
-		(_,Just matchresult) -> print matchresult
-		(rating,Nothing) -> do
+		(rating,mb_matchresult) -> do
 			print pos
-			print moves
-			get_input
-			where
-			moves = moveGen pos
-			get_input = do
-				putStr "> "
-				s <- getLine
-				case s of
-					"i" -> loop depth [initialPosition] 
-					"random" -> randomMatch pos
-					"q" -> return ()
-					"s" -> do
-						let (_,move:_) = search depth [] pos
-						loop depth (doMove pos move : poss)
-					"r" -> do
-						putStrLn $ "Rating: " ++ show (rate pos)
-						loop depth poss
-					"b" -> loop depth lastpos
-					depthstr | all isDigit depthstr -> do
-						let [(depth,"")] = reads depthstr
-						putStrLn $ "Set depth to " ++ show depth
-						loop depth poss
-					m -> case filter ((m==).snd) (zip moves (map show moves)) of
-						[] -> do
-							putStrLn "No move."
-							get_input
-						[(move,_)] -> loop depth (doMove pos move : poss)
+			case mb_matchresult of
+				Just matchresult -> print matchresult
+				Nothing -> do
+					print moves
+					get_input
+					where
+					moves = moveGen pos
+					get_input = do
+						putStr "> "
+						s <- getLine
+						case s of
+							"i" -> loop depth [initialPosition] 
+							"random" -> randomMatch pos
+							"q" -> return ()
+							"s" -> do
+								let (_,move:_) = search depth [] pos
+								loop depth (doMove pos move : poss)
+							"r" -> do
+								putStrLn $ "Rating: " ++ show (rate pos)
+								loop depth poss
+							"b" -> loop depth lastpos
+							depthstr | all isDigit depthstr -> do
+								let [(depth,"")] = reads depthstr
+								putStrLn $ "Set depth to " ++ show depth
+								loop depth poss
+							m -> case filter ((m==).snd) (zip moves (map show moves)) of
+								[] -> do
+									putStrLn "No move."
+									get_input
+								[(move,_)] -> loop depth (doMove pos move : poss)
 
-			randomMatch pos = case rate pos of
-				(_,Just ending) -> print ending
-				(rating,Nothing) -> do
-					putStrLn $ "Rating=" ++ show rating
-					let moves = (if pColourToMove pos == White then reverse else id) $
-						sortBy (comparing fst) $ map (\ m -> (rate $ doMove pos m,m)) $ moveGen pos
-					r <- randomIO
-					let (_,move) = moves!!(mod r $ min 5 (length moves))
-					putStrLn $ "Moving " ++ show move
-					let pos' = doMove pos move
-					print pos'
-					randomMatch pos'
+					randomMatch pos = case rate pos of
+						(_,Just ending) -> print ending
+						(rating,Nothing) -> do
+							putStrLn $ "Rating=" ++ show rating
+							let moves = (if pColourToMove pos == White then reverse else id) $
+								sortBy (comparing fst) $ map (\ m -> (rate $ doMove pos m,m)) $ moveGen pos
+							r <- randomIO
+							let (_,move) = moves!!(mod r $ min 5 (length moves))
+							putStrLn $ "Moving " ++ show move
+							let pos' = doMove pos move
+							print pos'
+							randomMatch pos'
 		
