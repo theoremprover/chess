@@ -288,6 +288,44 @@ rate pos = (0.1*mobility + sum [ (if colour==White then id else negate) piece_va
 		where
 		light_figures = all (`elem` [Ú,Û])
 
+data SearchState = SearchState {
+	currentPos          :: Pos,
+	αβWindow            :: (Rating,Rating),
+	αβCutoffs           :: (Int,Int),
+	nodesProcessed      :: Int,
+	evaluationsDone     :: Int,
+	lastStateOutputTime :: Integer }
+	deriving (Show)
+
+type SearchM a = StateT SearchState IO a
+
+startSearch depth pos = runStateT (searchM depth [] wHITE_MATE bLACK_MATE) $ SearchState pos 0 0 0 0 0
+
+moveGenM = gets currentPos >>= return . moveGen
+rateM = gets currentPos >>= return . rate
+doMoveM move = modify (\ s -> s { currentPos = doMove move pos })
+
+searchM depth line = do
+	SearchState{..} <- gets
+	(rating,mb_matchresult) <- rateM
+	case mb_matchresult of
+		Just _ -> return (rating,line)
+		Nothing -> case depth of
+			0 -> return (rating,line)
+			_ -> do
+				moves <- moveGenM
+				(rating,best_line) <- try_moves moves (best_rating,[])
+				where
+				r1 `isBetterThan` r2 = if pColourToMove == White then (>=) else (<=)
+				try_moves [] (best_rating,best_line) = return (best_rating,best_line)
+				try_moves (move:moves) (best_rating,best_line) = do
+					doMoveM move
+					(rating,line) <- searchM (depth-1) (move:line)
+					case rating `isBetterThan` best_rating of
+						True -> try_moves moves (rating,line)
+						False -> try_moves moves (best_rating,best_line)
+	
+{-
 search     0 line pos = (fst $ rate pos,line)
 search     _ line pos | (rating,Just _) <- rate pos = (rating,line)
 search depth line pos = (best_rating,last best_line:line)
@@ -296,6 +334,7 @@ search depth line pos = (best_rating,last best_line:line)
 	(best_rating,best_line) = minimax continuations
 	moves = moveGen pos
 	continuations = map (\ move -> search (depth-1) (move:line) (doMove pos move)) moves 
+-}
 
 main = do
 	loop 2 [initialPosition]
@@ -319,7 +358,7 @@ loop depth poss@(pos:lastpos) = do
 							"random" -> randomMatch pos
 							"q" -> return ()
 							"s" -> do
-								let (_,move:_) = search depth [] pos
+								(_,move:_) <- startSearch depth pos
 								loop depth (doMove pos move : poss)
 							"r" -> do
 								putStrLn $ "Rating: " ++ show (rate pos)
