@@ -14,7 +14,7 @@ import System.Random
 import Control.Monad.State
 
 data Piece = Ù | Ú | Û | Ü | Ý | Þ deriving (Show,Eq,Enum,Ord)
-data Colour = White | Black deriving (Show,Eq,Enum,Ord)
+data Colour = White | Black deriving (Show,Eq,Enum,Ord,Read)
 nextColour White = Black
 nextColour Black = White
 data File = A | B | C | D | E | F | G | H
@@ -35,9 +35,8 @@ data Position = Position {
 	pMoveCounter        :: Int }
 	deriving (Eq)
 
-initialPosition = Position {
+testPosition = Position {
 	pBoard = boardFromString [
---{-
 		"ØçØçØçØç",
 		"çØçØçØçØ",
 		"ØçØçØçØç",
@@ -52,8 +51,9 @@ initialPosition = Position {
 	pEnPassantSquare    = Nothing,
 	pHalfmoveClock      = 0,
 	pMoveCounter        = 0 }
--- -}
-{-
+
+initialPosition = Position {
+	pBoard = boardFromString [
 		"âïáòäðàñ",
 		"îßîßîßîß",
 		"ØçØçØçØç",
@@ -68,7 +68,6 @@ initialPosition = Position {
 	pEnPassantSquare    = Nothing,
 	pHalfmoveClock      = 0,
 	pMoveCounter        = 0 }
--}
 
 boardFromString s = listArray ((A,First),(H,Eighth)) $ map to_fig $ concat $ map reverse $ transpose s
 	where
@@ -278,8 +277,9 @@ rate pos = (0.1*mobility + sum [ (if colour==White then id else negate) piece_va
 	distance (file1,rank1) (file2,rank2) =
 		max (abs (fromEnum file1 - fromEnum file2)) (abs (fromEnum rank1 - fromEnum rank2))
 	mobility :: Rating
-	mobility = fromIntegral $ length (moveTargets pos) -
-		length (moveTargets (pos { pColourToMove = nextColour (pColourToMove pos) }))
+	mobility = fromIntegral $
+		length (moveGen $ pos { pColourToMove = White }) -
+		length (moveGen $ pos { pColourToMove = Black })
 
 max_one_light_figure Position{..} = case sort $ filter ((/=Þ).snd) $ catMaybes $ elems pBoard of
 	[]                                                                    -> True
@@ -290,7 +290,6 @@ max_one_light_figure Position{..} = case sort $ filter ((/=Þ).snd) $ catMaybes 
 	light_figures = all (`elem` [Ú,Û])
 
 data SearchState = SearchState {
-	αβWindow            :: (Rating,Rating),
 	αβCutoffs           :: (Int,Int),
 	nodesProcessed      :: Int,
 	evaluationsDone     :: Int,
@@ -299,10 +298,13 @@ data SearchState = SearchState {
 
 type SearchM a = StateT SearchState IO a
 
-startSearch depth pos = runStateT (searchM pos depth []) $ SearchState 0 0 0 0 0
+startSearch depth pos = runStateT (searchM pos depth []) $ SearchState (0,0) 0 0 0
 
 type Line = [Move]
 type Depth = Int
+
+-- α is the maximal value that the Minimizer has for sure from previous alternatives
+-- β is the minimal value that the Maximizer has for sure from previous alternatives
 
 searchM :: Position -> Depth -> Line -> SearchM (Rating,Line)
 searchM pos@Position{..} depth line = do
@@ -339,7 +341,10 @@ loop depth poss@(pos:lastpos) = do
 						putStr "> "
 						s <- getLine
 						case s of
-							"i" -> loop depth [initialPosition] 
+							"i" -> loop depth [initialPosition]
+							colourstring | [(colour,"")] <- reads colourstring -> loop depth (pos { pColourToMove = colour } : poss)
+							
+							"t" -> loop depth [testPosition]
 							"random" -> randomMatch pos
 							"q" -> return ()
 							"s" -> do
