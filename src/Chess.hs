@@ -11,6 +11,7 @@ import Data.List
 import Data.Tuple
 import Data.NumInstances
 import System.Random
+import Control.Monad.State
 
 data Piece = Ù | Ú | Û | Ü | Ý | Þ deriving (Show,Eq,Enum,Ord)
 data Colour = White | Black deriving (Show,Eq,Enum,Ord)
@@ -39,12 +40,12 @@ initialPosition = Position {
 --{-
 		"ØçØçØçØç",
 		"çØçØçØçØ",
-		"ØçØçØíØó",
-		"çØçØçØçØ",
 		"ØçØçØçØç",
+		"íØóØçØçØ",
+		"ØçØçØçÜç",
 		"çØçØçØç ",
-		"ØçØçØçØç",
-		"çØçØçØëØ" ],
+		"ØçØñØçØç",
+		"çØçØçØçØ" ],
 	pColourToMove       = White,
 	pCanCastleQueenSide = [],
 	pCanCastleKingSide  = [],
@@ -280,16 +281,15 @@ rate pos = (0.1*mobility + sum [ (if colour==White then id else negate) piece_va
 	mobility = fromIntegral $ length (moveTargets pos) -
 		length (moveTargets (pos { pColourToMove = nextColour (pColourToMove pos) }))
 
-	max_one_light_figure Position{..} = case sort $ filter ((/=Þ).snd) $ catMaybes $ elems pBoard of
-		[]                                                                    -> True
-		[(_,fig)]                 | light_figures [fig]                       -> True
-		[(col1,fig1),(col2,fig2)] | light_figures [fig1,fig2] && col1 /= col2 -> True
-		_                                                                     -> False
-		where
-		light_figures = all (`elem` [Ú,Û])
+max_one_light_figure Position{..} = case sort $ filter ((/=Þ).snd) $ catMaybes $ elems pBoard of
+	[]                                                                    -> True
+	[(_,fig)]                 | light_figures [fig]                       -> True
+	[(col1,fig1),(col2,fig2)] | light_figures [fig1,fig2] && col1 /= col2 -> True
+	_                                                                     -> False
+	where
+	light_figures = all (`elem` [Ú,Û])
 
 data SearchState = SearchState {
-	currentPos          :: Pos,
 	αβWindow            :: (Rating,Rating),
 	αβCutoffs           :: (Int,Int),
 	nodesProcessed      :: Int,
@@ -299,42 +299,27 @@ data SearchState = SearchState {
 
 type SearchM a = StateT SearchState IO a
 
-startSearch depth pos = runStateT (searchM depth [] wHITE_MATE bLACK_MATE) $ SearchState pos 0 0 0 0 0
+startSearch depth pos = runStateT (searchM pos depth []) $ SearchState 0 0 0 0 0
 
-moveGenM = gets currentPos >>= return . moveGen
-rateM = gets currentPos >>= return . rate
-doMoveM move = modify (\ s -> s { currentPos = doMove move pos })
+type Line = [Move]
+type Depth = Int
 
-searchM depth line = do
-	SearchState{..} <- gets
-	(rating,mb_matchresult) <- rateM
+searchM :: Position -> Depth -> Line -> SearchM (Rating,Line)
+searchM pos@Position{..} depth line = do
+	SearchState{..} <- get
+	let (rating,mb_matchresult) = rate pos
 	case mb_matchresult of
 		Just _ -> return (rating,line)
 		Nothing -> case depth of
 			0 -> return (rating,line)
-			_ -> do
-				moves <- moveGenM
-				(rating,best_line) <- try_moves moves (best_rating,[])
+			_ -> try_moves (moveGen pos) (if pColourToMove==White then wHITE_MATE else bLACK_MATE,[])
+
 				where
-				r1 `isBetterThan` r2 = if pColourToMove == White then (>=) else (<=)
-				try_moves [] (best_rating,best_line) = return (best_rating,best_line)
+				isBetterThan = if pColourToMove==White then (>=) else (<=)
+				try_moves [] result = return result
 				try_moves (move:moves) (best_rating,best_line) = do
-					doMoveM move
-					(rating,line) <- searchM (depth-1) (move:line)
-					case rating `isBetterThan` best_rating of
-						True -> try_moves moves (rating,line)
-						False -> try_moves moves (best_rating,best_line)
-	
-{-
-search     0 line pos = (fst $ rate pos,line)
-search     _ line pos | (rating,Just _) <- rate pos = (rating,line)
-search depth line pos = (best_rating,last best_line:line)
-	where
-	minimax = if pColourToMove pos == White then maximum else minimum
-	(best_rating,best_line) = minimax continuations
-	moves = moveGen pos
-	continuations = map (\ move -> search (depth-1) (move:line) (doMove pos move)) moves 
--}
+					(rating,line) <- searchM (doMove pos move) (depth-1) (move:line)
+					try_moves moves $ if rating `isBetterThan` best_rating then (rating,line) else (best_rating,best_line)
 
 main = do
 	loop 2 [initialPosition]
@@ -358,8 +343,8 @@ loop depth poss@(pos:lastpos) = do
 							"random" -> randomMatch pos
 							"q" -> return ()
 							"s" -> do
-								(_,move:_) <- startSearch depth pos
-								loop depth (doMove pos move : poss)
+								((_,moves),ss) <- startSearch depth pos
+								loop depth (doMove pos (last moves) : poss)
 							"r" -> do
 								putStrLn $ "Rating: " ++ show (rate pos)
 								loop depth poss
