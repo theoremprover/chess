@@ -1,4 +1,4 @@
-{-# LANGUAGE UnicodeSyntax,RecordWildCards,TypeSynonymInstances,FlexibleInstances,OverlappingInstances #-}
+{-# LANGUAGE UnicodeSyntax,RecordWildCards,TypeSynonymInstances,FlexibleInstances,OverlappingInstances,TupleSections #-}
 
 module Main where
 
@@ -298,30 +298,43 @@ data SearchState = SearchState {
 
 type SearchM a = StateT SearchState IO a
 
-startSearch depth pos = runStateT (searchM pos depth []) $ SearchState (0,0) 0 0 0
+startSearch depth pos = runStateT (searchM pos depth [] (bLACK_MATE,wHITE_MATE)) $ SearchState (0,0) 0 0 0
 
 type Line = [Move]
 type Depth = Int
 
--- α is the maximal value that the Minimizer has for sure from previous alternatives
--- β is the minimal value that the Maximizer has for sure from previous alternatives
+-- α is the best value that the Maximizer has for sure from previous alternatives
+-- β is the best value that the Minimizer has for sure from previous alternatives
 
-searchM :: Position -> Depth -> Line -> SearchM (Rating,Line)
-searchM pos@Position{..} depth line = do
+searchM :: Position -> Depth -> Line -> (Rating,Rating) -> SearchM (Rating,Line,(Rating,Rating))
+searchM pos@Position{..} depth line (α,β) = do
 	SearchState{..} <- get
 	let (rating,mb_matchresult) = rate pos
 	case mb_matchresult of
-		Just _ -> return (rating,line)
+		Just _ -> return (rating,line,(α,β))
 		Nothing -> case depth of
-			0 -> return (rating,line)
-			_ -> try_moves (moveGen pos) (if pColourToMove==White then wHITE_MATE else bLACK_MATE,[])
-
+			0 -> return (rating,line,(α,β))
+			_ -> try_moves (moveGen pos) $ if pColourToMove==White then (α,[],(α,β))
 				where
-				isBetterThan = if pColourToMove==White then (>=) else (<=)
+				rate_negamax = (if pColourToMove==White then id else negate) . rate
 				try_moves [] result = return result
-				try_moves (move:moves) (best_rating,best_line) = do
-					(rating,line) <- searchM (doMove pos move) (depth-1) (move:line)
-					try_moves moves $ if rating `isBetterThan` best_rating then (rating,line) else (best_rating,best_line)
+				try_moves (move:moves) (best_rating,best_line,αβ) = 
+					(rating,line,_) <- searchM (doMove pos move) (depth-1) (move:line) 
+
+ case pColourToMove of
+					White -> do
+						case rating > best_rating of
+							False -> try_moves moves (best_rating,best_line,(α,β))
+							True  -> case rating > β of
+								True  -> return (best_rating,best_line,(α,β))
+								False -> try_moves moves (rating,line,(α,β))
+					Black -> do
+						(rating,line,_) <- searchM (doMove pos move) (depth-1) (move:line) (α,best_rating)
+						case rating < best_rating of
+							False -> try_moves moves (best_rating,best_line,(α,β))
+							True  -> case rating < α of
+								True  -> return (best_rating,best_line,(α,β))
+								False -> try_moves moves (rating,line,(α,β))
 
 main = do
 	loop 2 [initialPosition]
@@ -348,7 +361,7 @@ loop depth poss@(pos:lastpos) = do
 							"random" -> randomMatch pos
 							"q" -> return ()
 							"s" -> do
-								((_,moves),ss) <- startSearch depth pos
+								((_,moves,_),ss) <- startSearch depth pos
 								loop depth (doMove pos (last moves) : poss)
 							"r" -> do
 								putStrLn $ "Rating: " ++ show (rate pos)
