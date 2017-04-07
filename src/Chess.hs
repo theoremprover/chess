@@ -11,7 +11,7 @@ import Data.List
 import Data.Tuple
 import Data.NumInstances
 import System.Random
-import Control.Monad.State
+import Control.Monad.State.Strict
 
 data Piece = Ù | Ú | Û | Ü | Ý | Þ deriving (Show,Eq,Enum,Ord)
 data Colour = White | Black deriving (Show,Eq,Enum,Ord,Read)
@@ -278,8 +278,8 @@ rate pos = (0.1*mobility + sum [ (if colour==White then id else negate) piece_va
 		max (abs (fromEnum file1 - fromEnum file2)) (abs (fromEnum rank1 - fromEnum rank2))
 	mobility :: Rating
 	mobility = fromIntegral $
-		length (moveGen $ pos { pColourToMove = White }) -
-		length (moveGen $ pos { pColourToMove = Black })
+		length (moveTargets $ pos { pColourToMove = White }) -
+		length (moveTargets $ pos { pColourToMove = Black })
 
 max_one_light_figure Position{..} = case sort $ filter ((/=Þ).snd) $ catMaybes $ elems pBoard of
 	[]                                                                    -> True
@@ -298,43 +298,37 @@ data SearchState = SearchState {
 
 type SearchM a = StateT SearchState IO a
 
-startSearch depth pos = runStateT (searchM pos depth [] (bLACK_MATE,wHITE_MATE)) $ SearchState (0,0) 0 0 0
+startSearch depth pos = runStateT (searchM pos depth [] (wHITE_MATE,bLACK_MATE)) $ SearchState (0,0) 0 0 0
 
 type Line = [Move]
 type Depth = Int
 
--- α is the best value that the Maximizer has for sure from previous alternatives
--- β is the best value that the Minimizer has for sure from previous alternatives
+-- α is the best value that the Maximizing player has for sure from previous alternatives
+-- β is the best value that the Minimizing player has for sure from previous alternatives
 
-searchM :: Position -> Depth -> Line -> (Rating,Rating) -> SearchM (Rating,Line,(Rating,Rating))
-searchM pos@Position{..} depth line (α,β) = do
-	SearchState{..} <- get
+searchM :: Position -> Depth -> Line -> (Rating,Rating) -> SearchM (Rating,Line)
+searchM pos@Position{..} depth current_line (α,β) = do
+--	SearchState{..} <- get
 	let (rating,mb_matchresult) = rate pos
+	liftIO $ putStrLn $ "Current line (" ++ show rating ++ "):" ++ show current_line
+	let maximizer = pColourToMove == White
 	case mb_matchresult of
-		Just _ -> return (rating,line,(α,β))
+		Just _ -> return (rating,current_line)
 		Nothing -> case depth of
-			0 -> return (rating,line,(α,β))
-			_ -> try_moves (moveGen pos) $ if pColourToMove==White then (α,[],(α,β))
+			0 -> return (rating,current_line)
+			_ -> try_moves (moveGen pos) (if maximizer then α else β, undefined)
 				where
-				rate_negamax = (if pColourToMove==White then id else negate) . rate
 				try_moves [] result = return result
-				try_moves (move:moves) (best_rating,best_line,αβ) = 
-					(rating,line,_) <- searchM (doMove pos move) (depth-1) (move:line) 
-
- case pColourToMove of
-					White -> do
-						case rating > best_rating of
-							False -> try_moves moves (best_rating,best_line,(α,β))
-							True  -> case rating > β of
-								True  -> return (best_rating,best_line,(α,β))
-								False -> try_moves moves (rating,line,(α,β))
-					Black -> do
-						(rating,line,_) <- searchM (doMove pos move) (depth-1) (move:line) (α,best_rating)
-						case rating < best_rating of
-							False -> try_moves moves (best_rating,best_line,(α,β))
-							True  -> case rating < α of
-								True  -> return (best_rating,best_line,(α,β))
-								False -> try_moves moves (rating,line,(α,β))
+				try_moves (move:moves) (best_rating,best_line) = do
+					(rating,line) <- searchM (doMove pos move) (depth-1) (move:current_line) $
+						if maximizer then (best_rating,β) else (α,best_rating)
+					case if maximizer then rating > best_rating else rating < best_rating of
+						False -> try_moves moves (best_rating,best_line)
+						True  -> case if maximizer then rating > β else rating < α of
+							True  -> do
+								liftIO $ putStrLn "cutoff"
+								return (rating,undefined)
+							False -> try_moves moves (rating,move:current_line)
 
 main = do
 	loop 2 [initialPosition]
@@ -361,7 +355,8 @@ loop depth poss@(pos:lastpos) = do
 							"random" -> randomMatch pos
 							"q" -> return ()
 							"s" -> do
-								((_,moves,_),ss) <- startSearch depth pos
+								((rating,moves),SearchState{..}) <- startSearch depth pos
+								putStrLn $ "BEST LINE (" ++ show rating ++ "): " ++ show moves
 								loop depth (doMove pos (last moves) : poss)
 							"r" -> do
 								putStrLn $ "Rating: " ++ show (rate pos)
