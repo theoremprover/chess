@@ -290,7 +290,8 @@ max_one_light_figure Position{..} = case sort $ filter ((/=Þ).snd) $ catMaybes 
 	light_figures = all (`elem` [Ú,Û])
 
 data SearchState = SearchState {
-	αβCutoffs           :: (Int,Int),
+	αCutoffs            :: Int,
+	βCutoffs            :: Int,
 	nodesProcessed      :: Int,
 	evaluationsDone     :: Int,
 	lastStateOutputTime :: Integer }
@@ -298,7 +299,7 @@ data SearchState = SearchState {
 
 type SearchM a = StateT SearchState IO a
 
-startSearch depth pos = runStateT (searchM pos depth [] (wHITE_MATE,bLACK_MATE)) $ SearchState (0,0) 0 0 0
+startSearch depth pos = runStateT (searchM pos depth [] (wHITE_MATE,bLACK_MATE)) $ SearchState 0 0 0 0 0
 
 type Line = [Move]
 type Depth = Int
@@ -308,7 +309,7 @@ type Depth = Int
 
 searchM :: Position -> Depth -> Line -> (Rating,Rating) -> SearchM (Rating,Line)
 searchM pos@Position{..} depth current_line (α,β) = do
---	SearchState{..} <- get
+	SearchState{..} <- get
 	let (rating,mb_matchresult) = rate pos
 	liftIO $ putStrLn $ "Current line (" ++ show rating ++ "):" ++ show current_line
 	let maximizer = pColourToMove == White
@@ -326,7 +327,9 @@ searchM pos@Position{..} depth current_line (α,β) = do
 						False -> try_moves moves (best_rating,best_line)
 						True  -> case if maximizer then rating > β else rating < α of
 							True  -> do
-								liftIO $ putStrLn "cutoff"
+								modify $ case maximizer of
+									True  -> \ s -> s { βCutoffs = βCutoffs s + 1 }
+									False -> \ s -> s { αCutoffs = αCutoffs s + 1 }
 								return (rating,undefined)
 							False -> try_moves moves (rating,move:current_line)
 
@@ -345,7 +348,7 @@ loop depth poss@(pos:lastpos) = do
 					where
 					moves = moveGen pos
 					get_input = do
-						putStr "> "
+						putStr "? "
 						s <- getLine
 						case s of
 							"i" -> loop depth [initialPosition]
