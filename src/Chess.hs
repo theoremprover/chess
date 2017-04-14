@@ -12,6 +12,9 @@ import Data.Tuple
 import Data.NumInstances
 import System.Random
 import Control.Monad.State.Strict
+import Text.Printf
+import System.CPUTime
+import System.Time
 
 data Piece = Ù | Ú | Û | Ü | Ý | Þ deriving (Show,Eq,Enum,Ord)
 data Colour = White | Black deriving (Show,Eq,Enum,Ord,Read)
@@ -37,11 +40,11 @@ data Position = Position {
 
 testPosition = Position {
 	pBoard = boardFromString [
-		"ØçØçØçØç",
+		"ÞçØçØçØç",
+		"çØóØçØçØ",
+		"ØîßçØçØç",
 		"çØçØçØçØ",
-		"ØçØçØçØç",
-		"íØóØçØçØ",
-		"ØçØçØçÜç",
+		"ØëØçØçØç",
 		"çØçØçØç ",
 		"ØçØñØçØç",
 		"çØçØçØçØ" ],
@@ -126,7 +129,7 @@ moveIsCastling Position{..} Move{..} = case (pBoard!moveFrom,moveFrom,moveTo) of
 
 moveGen pos = filter (legal_move_wrt_check pos) $ moveTargets pos
 
--- is colour's move igoring check?
+-- is colour's move ignoring check?
 legal_move_wrt_check pos move = all (coors_not_in_check pos' (pColourToMove pos)) $ case moveIsCastling pos move of
 	Just (Left White) ->  [(E,First), (D,First), (C,First) ]
 	Just (Right White) -> [(E,First), (F,First), (G,First) ]
@@ -290,16 +293,23 @@ max_one_light_figure Position{..} = case sort $ filter ((/=Þ).snd) $ catMaybes 
 	light_figures = all (`elem` [Ú,Û])
 
 data SearchState = SearchState {
+	bestRating          :: Rating,
+	bestLine            :: [Move],
 	αCutoffs            :: Int,
 	βCutoffs            :: Int,
 	nodesProcessed      :: Int,
-	evaluationsDone     :: Int,
+	leavesEvaluated     :: Int,
 	lastStateOutputTime :: Integer }
 	deriving (Show)
 
 type SearchM a = StateT SearchState IO a
 
-startSearch depth pos = runStateT (searchM pos depth [] (wHITE_MATE,bLACK_MATE)) $ SearchState 0 0 0 0 0
+startSearch depth pos = runStateT (searchM pos (0.0,1.0) depth [] (wHITE_MATE,bLACK_MATE)) $ SearchState 0.0 [] 0 0 0 0 0
+
+printSearchStats SearchState{..} = liftIO $ do
+	showLine "Best line" bestRating bestLine
+	putStrLn $ printf "alpha-/beta cutoffs: %i/%i" αCutoffs βCutoffs
+	putStrLn $ printf "%i nodes processed, %i leaves evaluated" nodesProcessed leavesEvaluated
 
 type Line = [Move]
 type Depth = Int
@@ -307,30 +317,49 @@ type Depth = Int
 -- α is the best value that the Maximizing player has for sure from previous alternatives
 -- β is the best value that the Minimizing player has for sure from previous alternatives
 
-searchM :: Position -> Depth -> Line -> (Rating,Rating) -> SearchM (Rating,Line)
-searchM pos@Position{..} depth current_line (α,β) = do
-	SearchState{..} <- get
+showLine linestr rating line = do
+	liftIO $ putStrLn $ linestr ++ " (" ++ (printf "%.2f" rating) ++ ") :" ++ show line
+
+searchM :: Position -> (Float,Float) -> Depth -> Line -> (Rating,Rating) -> SearchM (Rating,Line)
+searchM pos@Position{..} (progress_0,progress_width) depth current_line (α,β) = do
+	modify $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
 	let (rating,mb_matchresult) = rate pos
-	liftIO $ putStrLn $ "Current line (" ++ show rating ++ "):" ++ show current_line
+	ss@SearchState{..} <- get
+	TOD current_secs _ <- liftIO getClockTime
+	when (current_secs - lastStateOutputTime >= 1) $ do
+		modify $ \ s -> s { lastStateOutputTime = current_secs }
+		liftIO $ printf "Progress: %.0f%%\n" (progress_0*100.0)
+		showLine "Current line" rating current_line 
+		liftIO $ printf "(alpha,beta) = (%.2f,%.2f)\n" α β
+		printSearchStats ss
+		liftIO $ putStrLn "-------------------------------------------------------"
 	let maximizer = pColourToMove == White
 	case mb_matchresult of
-		Just _ -> return (rating,current_line)
+		Just _ -> do
+			modify $ \ s -> s { leavesEvaluated = leavesEvaluated + 1 }
+			return (rating,current_line)
 		Nothing -> case depth of
-			0 -> return (rating,current_line)
-			_ -> try_moves (moveGen pos) (if maximizer then α else β, undefined)
+			0 -> do
+				modify $ \ s -> s { leavesEvaluated = leavesEvaluated + 1 }
+				return (rating,current_line)
+			_ -> try_moves all_moves (if maximizer then α else β, [])
 				where
+				all_moves = moveGen pos
 				try_moves [] result = return result
 				try_moves (move:moves) (best_rating,best_line) = do
-					(rating,line) <- searchM (doMove pos move) (depth-1) (move:current_line) $
+					let progress = (progress_0+progress_width*
+						(fromIntegral $ length all_moves - (length moves + 1))/(fromIntegral $ length all_moves),
+						progress_width/(fromIntegral $ length all_moves))
+					(rating,line) <- searchM (doMove pos move) progress (depth-1) (move:current_line) $
 						if maximizer then (best_rating,β) else (α,best_rating)
 					case if maximizer then rating > best_rating else rating < best_rating of
 						False -> try_moves moves (best_rating,best_line)
 						True  -> case if maximizer then rating > β else rating < α of
 							True  -> do
 								modify $ case maximizer of
-									True  -> \ s -> s { βCutoffs = βCutoffs s + 1 }
-									False -> \ s -> s { αCutoffs = αCutoffs s + 1 }
-								return (rating,undefined)
+									True  -> \ s -> s { βCutoffs = βCutoffs + 1 }
+									False -> \ s -> s { αCutoffs = αCutoffs + 1 }
+								return (rating,move:current_line)
 							False -> try_moves moves (rating,move:current_line)
 
 main = do
@@ -353,13 +382,13 @@ loop depth poss@(pos:lastpos) = do
 						case s of
 							"i" -> loop depth [initialPosition]
 							colourstring | [(colour,"")] <- reads colourstring -> loop depth (pos { pColourToMove = colour } : poss)
-							
 							"t" -> loop depth [testPosition]
 							"random" -> randomMatch pos
 							"q" -> return ()
 							"s" -> do
-								((rating,moves),SearchState{..}) <- startSearch depth pos
+								((rating,moves),ss) <- startSearch depth pos
 								putStrLn $ "BEST LINE (" ++ show rating ++ "): " ++ show moves
+								printSearchStats ss
 								loop depth (doMove pos (last moves) : poss)
 							"r" -> do
 								putStrLn $ "Rating: " ++ show (rate pos)
