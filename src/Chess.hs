@@ -318,7 +318,7 @@ type Depth = Int
 -- β is the best value that the Minimizing player has for sure from previous alternatives
 
 showLine linestr rating line = do
-	liftIO $ putStrLn $ linestr ++ " (" ++ (printf "%.2f" rating) ++ ") :" ++ show line
+	liftIO $ putStrLn $ linestr ++ " (" ++ (printf "%.2f" rating) ++ ") : " ++ show line
 
 searchM :: Position -> (Float,Float) -> Depth -> Line -> (Rating,Rating) -> SearchM (Rating,Line)
 searchM pos@Position{..} (progress_0,progress_width) depth current_line (α,β) = do
@@ -329,11 +329,10 @@ searchM pos@Position{..} (progress_0,progress_width) depth current_line (α,β) 
 	when (current_secs - lastStateOutputTime >= 1) $ do
 		modify $ \ s -> s { lastStateOutputTime = current_secs }
 		liftIO $ printf "Progress: %.0f%%\n" (progress_0*100.0)
-		showLine "Current line" rating current_line 
+		showLine "Current line" rating current_line
 		liftIO $ printf "(alpha,beta) = (%.2f,%.2f)\n" α β
 		printSearchStats ss
 		liftIO $ putStrLn "-------------------------------------------------------"
-	let maximizer = pColourToMove == White
 	case mb_matchresult of
 		Just _ -> do
 			modify $ \ s -> s { leavesEvaluated = leavesEvaluated + 1 }
@@ -345,22 +344,24 @@ searchM pos@Position{..} (progress_0,progress_width) depth current_line (α,β) 
 			_ -> try_moves all_moves (if maximizer then α else β, [])
 				where
 				all_moves = moveGen pos
+				num_moves = fromIntegral $ length all_moves
 				try_moves [] result = return result
 				try_moves (move:moves) (best_rating,best_line) = do
-					let progress = (progress_0+progress_width*
-						(fromIntegral $ length all_moves - (length moves + 1))/(fromIntegral $ length all_moves),
-						progress_width/(fromIntegral $ length all_moves))
-					(rating,line) <- searchM (doMove pos move) progress (depth-1) (move:current_line) $
+					let progress = (progress_0+progress_width*(num_moves - (fromIntegral $ length moves + 1))/num_moves,
+						progress_width/num_moves)
+					(sub_rating,sub_line) <- searchM (doMove pos move) progress (depth-1) (move:current_line) $
 						if maximizer then (best_rating,β) else (α,best_rating)
-					case if maximizer then rating > best_rating else rating < best_rating of
+					case (if maximizer then (>) else (<)) sub_rating best_rating of
 						False -> try_moves moves (best_rating,best_line)
-						True  -> case if maximizer then rating > β else rating < α of
-							True  -> do
-								modify $ case maximizer of
-									True  -> \ s -> s { βCutoffs = βCutoffs + 1 }
-									False -> \ s -> s { αCutoffs = αCutoffs + 1 }
-								return (rating,move:current_line)
-							False -> try_moves moves (rating,move:current_line)
+						True  -> case if maximizer then sub_rating > β else sub_rating < α of
+							True -> do
+								modify $ \ s -> case maximizer of
+									True  -> s { βCutoffs = βCutoffs + 1 }
+									False -> s { αCutoffs = αCutoffs + 1 }
+								return (sub_rating,sub_line)
+							False -> try_moves moves (sub_rating,sub_line)
+	where
+	maximizer = pColourToMove == White
 
 main = do
 	loop 2 [initialPosition]
