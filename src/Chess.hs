@@ -8,6 +8,7 @@ import Data.Ix
 import Data.Ord
 import Data.Char
 import Data.List
+import qualified Data.IntMap.Strict as Map
 import Data.Tuple
 import Data.NumInstances
 import System.Random
@@ -295,20 +296,33 @@ max_one_light_figure Position{..} = case sort $ filter ((/=Þ).snd) $ catMaybes 
 data SearchState = SearchState {
 	bestRating          :: Rating,
 	bestLine            :: [Move],
+	killerMoves         :: Map.IntMap [Move],
+	killerMoveHits      :: Int,
 	αCutoffs            :: Int,
 	βCutoffs            :: Int,
 	nodesProcessed      :: Int,
 	leavesEvaluated     :: Int,
+	searchStartTime     :: Integer,
 	lastStateOutputTime :: Integer }
 	deriving (Show)
 
+numKillerMoves = 10
+
 type SearchM a = StateT SearchState IO a
 
-startSearch depth pos = runStateT (searchM pos (0.0,1.0) depth [] (wHITE_MATE,bLACK_MATE)) $ SearchState 0.0 [] 0 0 0 0 0
+startSearch depth pos = do
+	TOD searchstarttime _ <- liftIO getClockTime
+	runStateT (searchM pos (0.0,1.0) depth [] (wHITE_MATE,bLACK_MATE)) $
+		SearchState 0.0 [] Map.empty 0 0 0 0 0 searchstarttime 0
 
 printSearchStats SearchState{..} = liftIO $ do
 	showLine "Best line" bestRating bestLine
 	putStrLn $ printf "alpha-/beta cutoffs: %i/%i" αCutoffs βCutoffs
+	putStrLn $ printf "Killer move hits: %i" killerMoveHits
+	putStrLn $ printf "Killer move usage: %s" (show $ map length $ Map.elems killerMoves)
+	TOD current_secs _ <- liftIO getClockTime
+	let duration = current_secs - searchStartTime
+	putStrLn $ printf "Search time: %is, total %i nodes/s" duration (div nodesProcessed (max 1 (fromIntegral duration))) 
 	putStrLn $ printf "%i nodes processed, %i leaves evaluated" nodesProcessed leavesEvaluated
 
 type Line = [Move]
@@ -324,9 +338,9 @@ searchM :: Position -> (Float,Float) -> Depth -> Line -> (Rating,Rating) -> Sear
 searchM pos@Position{..} (progress_0,progress_width) depth current_line (α,β) = do
 	modify $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
 	let (rating,mb_matchresult) = rate pos
-	ss@SearchState{..} <- get
+	ss <- get
 	TOD current_secs _ <- liftIO getClockTime
-	when (current_secs - lastStateOutputTime >= 1) $ do
+	when (current_secs - lastStateOutputTime ss >= 1) $ do
 		modify $ \ s -> s { lastStateOutputTime = current_secs }
 		liftIO $ printf "Progress: %.0f%%\n" (progress_0*100.0)
 		showLine "Current line" rating current_line
@@ -335,19 +349,24 @@ searchM pos@Position{..} (progress_0,progress_width) depth current_line (α,β) 
 		liftIO $ putStrLn "-------------------------------------------------------"
 	case mb_matchresult of
 		Just _ -> do
-			modify $ \ s -> s { leavesEvaluated = leavesEvaluated + 1 }
+			modify $ \ s -> s { leavesEvaluated = leavesEvaluated s + 1 }
 			return (rating,current_line)
 		Nothing -> case depth of
 			0 -> do
-				modify $ \ s -> s { leavesEvaluated = leavesEvaluated + 1 }
+				modify $ \ s -> s { leavesEvaluated = leavesEvaluated s + 1 }
 				return (rating,current_line)
-			_ -> try_moves all_moves (if maximizer then α else β, [])
+			_ -> do
+				SearchState{..} <- get
+				let
+					killer_moves = Map.findWithDefault [] depth killerMoves
+					sorted_moves = (gen_moves `intersect` killer_moves) ++ (gen_moves \\ killer_moves)
+				try_moves sorted_moves (if maximizer then α else β, [])
 				where
-				all_moves = moveGen pos
-				num_moves = fromIntegral $ length all_moves
+				gen_moves = moveGen pos
+				num_moves = fromIntegral $ length gen_moves
 				try_moves [] result = return result
 				try_moves (move:moves) (best_rating,best_line) = do
-					let progress = (progress_0+progress_width*(num_moves - (fromIntegral $ length moves + 1))/num_moves,
+					let progress = (progress_0+progress_width*(num_moves - (fromIntegral $ length moves + 1)) / num_moves,
 						progress_width/num_moves)
 					(sub_rating,sub_line) <- searchM (doMove pos move) progress (depth-1) (move:current_line) $
 						if maximizer then (best_rating,β) else (α,best_rating)
@@ -355,9 +374,13 @@ searchM pos@Position{..} (progress_0,progress_width) depth current_line (α,β) 
 						False -> try_moves moves (best_rating,best_line)
 						True  -> case if maximizer then sub_rating > β else sub_rating < α of
 							True -> do
+								killermoves <- gets killerMoves
+								case move `elem` Map.findWithDefault [] depth killermoves of
+									False -> modify $ \ s -> s { killerMoves = Map.alter (Just . take numKillerMoves . (move:) . maybe [] id) depth (killerMoves s) }
+									True  -> modify $ \ s -> s { killerMoveHits = killerMoveHits s + 1 }
 								modify $ \ s -> case maximizer of
-									True  -> s { βCutoffs = βCutoffs + 1 }
-									False -> s { αCutoffs = αCutoffs + 1 }
+									True  -> s { βCutoffs = βCutoffs s + 1 }
+									False -> s { αCutoffs = αCutoffs s + 1 }
 								return (sub_rating,sub_line)
 							False -> try_moves moves (sub_rating,sub_line)
 	where
