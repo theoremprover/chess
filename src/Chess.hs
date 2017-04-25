@@ -41,15 +41,15 @@ data Position = Position {
 
 testPosition = Position {
 	pBoard = boardFromString [
-		"ÞçØçØçØç",
-		"çØóØçØçØ",
-		"ØîßçØçØç",
-		"çØçØçØçØ",
-		"ØëØçØçØç",
+		"ØçØçØíØç",
+		"çâçØçØçØ",
+		"ØçØçØóØç",
+		"çØçØçØçÙ",
+		"ØçØçØçØç",
 		"çØçØçØç ",
-		"ØçØñØçØç",
+		"ØçØçØçØç",
 		"çØçØçØçØ" ],
-	pColourToMove       = White,
+	pColourToMove       = Black,
 	pCanCastleQueenSide = [],
 	pCanCastleKingSide  = [],
 	pEnPassantSquare    = Nothing,
@@ -319,7 +319,7 @@ printSearchStats SearchState{..} = liftIO $ do
 	showLine "Best line" bestRating bestLine
 	putStrLn $ printf "alpha-/beta cutoffs: %i/%i" αCutoffs βCutoffs
 	putStrLn $ printf "Killer move hits: %i" killerMoveHits
-	putStrLn $ printf "Killer move usage: %s" (show $ map length $ Map.elems killerMoves)
+	putStrLn $ printf "Killer moves: %s" (show $ Map.assocs killerMoves)
 	TOD current_secs _ <- liftIO getClockTime
 	let duration = current_secs - searchStartTime
 	putStrLn $ printf "Search time: %is, total %i nodes/s" duration (div nodesProcessed (max 1 (fromIntegral duration))) 
@@ -334,31 +334,36 @@ type Depth = Int
 showLine linestr rating line = do
 	liftIO $ putStrLn $ linestr ++ " (" ++ (printf "%.2f" rating) ++ ") : " ++ show line
 
+TODO: Best Line update
+
 searchM :: Position -> (Float,Float) -> Depth -> Line -> (Rating,Rating) -> SearchM (Rating,Line)
-searchM pos@Position{..} (progress_0,progress_width) depth current_line (α,β) = do
+searchM pos@Position{..} (progress_0,progress_width) rest_depth current_line (α,β) = do
 	modify $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
 	let (rating,mb_matchresult) = rate pos
 	ss <- get
 	TOD current_secs _ <- liftIO getClockTime
 	when (current_secs - lastStateOutputTime ss >= 1) $ do
 		modify $ \ s -> s { lastStateOutputTime = current_secs }
+		liftIO $ print pos
 		liftIO $ printf "Progress: %.0f%%\n" (progress_0*100.0)
 		showLine "Current line" rating current_line
 		liftIO $ printf "(alpha,beta) = (%.2f,%.2f)\n" α β
 		printSearchStats ss
 		liftIO $ putStrLn "-------------------------------------------------------"
+--		liftIO $ getLine
+		return ()
 	case mb_matchresult of
 		Just _ -> do
 			modify $ \ s -> s { leavesEvaluated = leavesEvaluated s + 1 }
 			return (rating,current_line)
-		Nothing -> case depth of
+		Nothing -> case rest_depth of
 			0 -> do
 				modify $ \ s -> s { leavesEvaluated = leavesEvaluated s + 1 }
 				return (rating,current_line)
 			_ -> do
 				SearchState{..} <- get
 				let
-					killer_moves = Map.findWithDefault [] depth killerMoves
+					killer_moves = Map.findWithDefault [] rest_depth killerMoves
 					sorted_moves = (gen_moves `intersect` killer_moves) ++ (gen_moves \\ killer_moves)
 				try_moves sorted_moves (if maximizer then α else β, [])
 				where
@@ -368,15 +373,16 @@ searchM pos@Position{..} (progress_0,progress_width) depth current_line (α,β) 
 				try_moves (move:moves) (best_rating,best_line) = do
 					let progress = (progress_0+progress_width*(num_moves - (fromIntegral $ length moves + 1)) / num_moves,
 						progress_width/num_moves)
-					(sub_rating,sub_line) <- searchM (doMove pos move) progress (depth-1) (move:current_line) $
+					(sub_rating,sub_line) <- searchM (doMove pos move) progress (rest_depth-1) (move:current_line) $
 						if maximizer then (best_rating,β) else (α,best_rating)
-					case (if maximizer then (>) else (<)) sub_rating best_rating of
+					case (if maximizer then (>=) else (<=)) sub_rating best_rating of
 						False -> try_moves moves (best_rating,best_line)
-						True  -> case if maximizer then sub_rating > β else sub_rating < α of
+						True  -> case if maximizer then sub_rating >= β else sub_rating <= α of
 							True -> do
 								killermoves <- gets killerMoves
-								case move `elem` Map.findWithDefault [] depth killermoves of
-									False -> modify $ \ s -> s { killerMoves = Map.alter (Just . take numKillerMoves . (move:) . maybe [] id) depth (killerMoves s) }
+								case move `elem` Map.findWithDefault [] rest_depth killermoves of
+									False -> modify $ \ s -> s { killerMoves = Map.alter
+										(Just . take numKillerMoves . (move:) . maybe [] id) rest_depth (killerMoves s) }
 									True  -> modify $ \ s -> s { killerMoveHits = killerMoveHits s + 1 }
 								modify $ \ s -> case maximizer of
 									True  -> s { βCutoffs = βCutoffs s + 1 }
@@ -387,7 +393,7 @@ searchM pos@Position{..} (progress_0,progress_width) depth current_line (α,β) 
 	maximizer = pColourToMove == White
 
 main = do
-	loop 2 [initialPosition]
+	loop 4 [initialPosition]
 
 loop depth poss@(pos:lastpos) = do
 	case rate pos of
