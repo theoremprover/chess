@@ -242,11 +242,11 @@ doMove pos@Position{..} mov@Move{..} = Position {
 
 	(no_castling_queenside_any_more,no_castling_kingside_any_more) = case (moveFrom,pColourToMove) of
 		_ | moved_piece==Þ -> (True, True )
-		((H,First), White) -> (False,True )
-		((A,First), White) -> (True ,False)
-		((H,Eighth),Black) -> (False,True )
-		((A,Eighth),Black) -> (True ,False)
-		_                  -> (False,False)
+		((H,First), White)  -> (False,True )
+		((A,First), White)  -> (True ,False)
+		((H,Eighth),Black)  -> (False,True )
+		((A,Eighth),Black)  -> (True ,False)
+		_                   -> (False,False)
 
 type Rating = Float
 wHITE_MATE = -10000.0 :: Float
@@ -313,7 +313,9 @@ type SearchM a = StateT SearchState IO a
 startSearch depth pos = do
 	TOD searchstarttime _ <- liftIO getClockTime
 	runStateT (searchM pos (0.0,1.0) depth [] (wHITE_MATE,bLACK_MATE)) $
-		SearchState 0.0 [] Map.empty 0 0 0 0 0 searchstarttime 0
+		SearchState worst_rating [] Map.empty 0 0 0 0 0 searchstarttime 0
+	where
+	worst_rating = if pColourToMove pos == White then wHITE_MATE else bLACK_MATE
 
 printSearchStats SearchState{..} = liftIO $ do
 	showLine "Best line" bestRating bestLine
@@ -334,7 +336,7 @@ type Depth = Int
 showLine linestr rating line = do
 	liftIO $ putStrLn $ linestr ++ " (" ++ (printf "%.2f" rating) ++ ") : " ++ show line
 
-TODO: Best Line update
+-- TODO: Best Line update
 
 searchM :: Position -> (Float,Float) -> Depth -> Line -> (Rating,Rating) -> SearchM (Rating,Line)
 searchM pos@Position{..} (progress_0,progress_width) rest_depth current_line (α,β) = do
@@ -365,7 +367,7 @@ searchM pos@Position{..} (progress_0,progress_width) rest_depth current_line (α
 				let
 					killer_moves = Map.findWithDefault [] rest_depth killerMoves
 					sorted_moves = (gen_moves `intersect` killer_moves) ++ (gen_moves \\ killer_moves)
-				try_moves sorted_moves (if maximizer then α else β, [])
+				try_moves sorted_moves (if maximizer then α else β, bestLine)
 				where
 				gen_moves = moveGen pos
 				num_moves = fromIntegral $ length gen_moves
@@ -388,7 +390,13 @@ searchM pos@Position{..} (progress_0,progress_width) rest_depth current_line (α
 									True  -> s { βCutoffs = βCutoffs s + 1 }
 									False -> s { αCutoffs = αCutoffs s + 1 }
 								return (sub_rating,sub_line)
-							False -> try_moves moves (sub_rating,sub_line)
+							False -> do
+								SearchState{..} <- get
+								when (if maximizer then sub_rating > bestRating else sub_rating < bestRating ) $ do
+									modify $ \ s -> s {
+										bestLine   = sub_line,
+										bestRating = sub_rating }
+								try_moves moves (sub_rating,sub_line)
 	where
 	maximizer = pColourToMove == White
 
