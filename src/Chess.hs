@@ -1,7 +1,8 @@
-{-# LANGUAGE UnicodeSyntax,RecordWildCards,TypeSynonymInstances,FlexibleInstances,OverlappingInstances,TupleSections #-}
+{-# LANGUAGE UnicodeSyntax,RecordWildCards,TypeSynonymInstances,FlexibleInstances,OverlappingInstances,TupleSections,DeriveGeneric #-}
 
 module Main where
 
+import GHC.Generics (Generic)
 import Data.Array
 import Data.Maybe
 import Data.Ix
@@ -16,19 +17,28 @@ import Control.Monad.State.Strict
 import Text.Printf
 import System.CPUTime
 import System.Time
+import Data.Hashable
+import qualified Data.HashMap.Strict as HashMap (insert,HashMap,empty,lookup,size)
 
-data Piece = Ù | Ú | Û | Ü | Ý | Þ deriving (Show,Eq,Enum,Ord)
-data Colour = White | Black deriving (Show,Eq,Enum,Ord,Read)
+data Piece = Ù | Ú | Û | Ü | Ý | Þ deriving (Show,Eq,Enum,Ord,Generic)
+instance Hashable Piece
+data Colour = White | Black deriving (Show,Eq,Enum,Ord,Read,Generic)
+instance Hashable Colour
 nextColour White = Black
 nextColour Black = White
 data File = A | B | C | D | E | F | G | H
-	deriving (Show,Ix,Ord,Eq,Enum)
+	deriving (Show,Ix,Ord,Eq,Enum,Generic)
+instance Hashable File
 data Rank = First | Second | Third | Fourth | Fifth | Sixth | Seventh | Eighth
-	deriving (Ix,Ord,Eq,Enum)
+	deriving (Ix,Ord,Eq,Enum,Generic)
+instance Hashable Rank
 instance Show Rank where
 	show rank = show $ index (First,Eighth) rank + 1
 type Coors = (File,Rank)
 type Board = Array Coors (Maybe (Colour,Piece))
+instance Hashable Board where
+	hashWithSalt salt board = hashWithSalt salt (assocs board)
+
 data Position = Position {
 	pBoard              :: Board,
 	pColourToMove       :: Colour,
@@ -37,7 +47,8 @@ data Position = Position {
 	pEnPassantSquare    :: Maybe Coors,
 	pHalfmoveClock      :: Int,
 	pMoveCounter        :: Int }
-	deriving (Eq)
+	deriving (Eq,Generic)
+instance Hashable Position
 
 testPosition = Position {
 	pBoard = boardFromString [
@@ -298,6 +309,9 @@ data SearchState = SearchState {
 	bestLine            :: [Move],
 	killerMoves         :: Map.IntMap [Move],
 	killerMoveHits      :: Int,
+	memoizationHits     :: Int,
+	memoizationMisses   :: Int,
+	positionHashtable   :: HashMap.HashMap Position (Rating,Line),
 	αCutoffs            :: Int,
 	βCutoffs            :: Int,
 	nodesProcessed      :: Int,
@@ -313,7 +327,7 @@ type SearchM a = StateT SearchState IO a
 startSearch depth pos = do
 	TOD searchstarttime _ <- liftIO getClockTime
 	runStateT (searchM pos (0.0,1.0) depth [] (wHITE_MATE,bLACK_MATE)) $
-		SearchState worst_rating [] Map.empty 0 0 0 0 0 searchstarttime 0
+		SearchState worst_rating [] Map.empty 0 0 0 HashMap.empty 0 0 0 0 searchstarttime 0
 	where
 	worst_rating = if pColourToMove pos == White then wHITE_MATE else bLACK_MATE
 
@@ -322,6 +336,8 @@ printSearchStats SearchState{..} = liftIO $ do
 	putStrLn $ printf "alpha-/beta cutoffs: %i/%i" αCutoffs βCutoffs
 	putStrLn $ printf "Killer move hits: %i" killerMoveHits
 	putStrLn $ printf "Killer moves: %s" (show $ Map.assocs killerMoves)
+	putStrLn $ printf "Hashed Positions: %i" (HashMap.size positionHashtable)
+	putStrLn $ printf "Position Hashtable hits/misses: %i/%i" memoizationHits memoizationMisses
 	TOD current_secs _ <- liftIO getClockTime
 	let duration = current_secs - searchStartTime
 	putStrLn $ printf "Search time: %is, total %i nodes/s" duration (div nodesProcessed (max 1 (fromIntegral duration))) 
@@ -335,8 +351,6 @@ type Depth = Int
 
 showLine linestr rating line = do
 	liftIO $ putStrLn $ linestr ++ " (" ++ (printf "%.2f" rating) ++ ") : " ++ show line
-
--- TODO: Best Line update
 
 searchM :: Position -> (Float,Float) -> Depth -> Line -> (Rating,Rating) -> SearchM (Rating,Line)
 searchM pos@Position{..} (progress_0,progress_width) rest_depth current_line (α,β) = do
@@ -363,40 +377,48 @@ searchM pos@Position{..} (progress_0,progress_width) rest_depth current_line (α
 				modify $ \ s -> s { leavesEvaluated = leavesEvaluated s + 1 }
 				return (rating,current_line)
 			_ -> do
-				SearchState{..} <- get
-				let
-					killer_moves = Map.findWithDefault [] rest_depth killerMoves
-					sorted_moves = (gen_moves `intersect` killer_moves) ++ (gen_moves \\ killer_moves)
-				try_moves sorted_moves (if maximizer then α else β, bestLine)
-				where
-				gen_moves = moveGen pos
-				num_moves = fromIntegral $ length gen_moves
-				try_moves [] result = return result
-				try_moves (move:moves) (best_rating,best_line) = do
-					let progress = (progress_0+progress_width*(num_moves - (fromIntegral $ length moves + 1)) / num_moves,
-						progress_width/num_moves)
-					(sub_rating,sub_line) <- searchM (doMove pos move) progress (rest_depth-1) (move:current_line) $
-						if maximizer then (best_rating,β) else (α,best_rating)
-					case (if maximizer then (>=) else (<=)) sub_rating best_rating of
-						False -> try_moves moves (best_rating,best_line)
-						True  -> case if maximizer then sub_rating >= β else sub_rating <= α of
-							True -> do
-								killermoves <- gets killerMoves
-								case move `elem` Map.findWithDefault [] rest_depth killermoves of
-									False -> modify $ \ s -> s { killerMoves = Map.alter
-										(Just . take numKillerMoves . (move:) . maybe [] id) rest_depth (killerMoves s) }
-									True  -> modify $ \ s -> s { killerMoveHits = killerMoveHits s + 1 }
-								modify $ \ s -> case maximizer of
-									True  -> s { βCutoffs = βCutoffs s + 1 }
-									False -> s { αCutoffs = αCutoffs s + 1 }
-								return (sub_rating,sub_line)
-							False -> do
-								SearchState{..} <- get
-								when (if maximizer then sub_rating > bestRating else sub_rating < bestRating ) $ do
-									modify $ \ s -> s {
-										bestLine   = sub_line,
-										bestRating = sub_rating }
-								try_moves moves (sub_rating,sub_line)
+				posTable <- gets positionHashtable --SearchState{..} <- get
+				case HashMap.lookup pos posTable of
+					Just (sub_rating,sub_line) -> do
+						modify $ \ s -> s { memoizationHits = memoizationHits s + 1 }
+						return (sub_rating,sub_line++current_line)
+					Nothing -> do
+						modify $ \ s -> s { memoizationMisses = memoizationMisses s + 1 }
+						SearchState{..} <- get
+						let
+							killer_moves = Map.findWithDefault [] rest_depth killerMoves
+							sorted_moves = (gen_moves `intersect` killer_moves) ++ (gen_moves \\ killer_moves)
+						try_moves sorted_moves (if maximizer then α else β, bestLine)
+						where
+						gen_moves = moveGen pos
+						num_moves = fromIntegral $ length gen_moves
+						try_moves [] result = return result
+						try_moves (move:moves) (best_rating,best_line) = do
+							let progress = (progress_0+progress_width*(num_moves - (fromIntegral $ length moves + 1)) / num_moves,
+								progress_width/num_moves)
+							(sub_rating,sub_line) <- searchM (doMove pos move) progress (rest_depth-1) (move:current_line) $
+								if maximizer then (best_rating,β) else (α,best_rating)
+							modify $ \ s -> s { positionHashtable = HashMap.insert pos (sub_rating,sub_line) (positionHashtable s) }
+							case (if maximizer then (>=) else (<=)) sub_rating best_rating of
+								False -> try_moves moves (best_rating,best_line)
+								True  -> case if maximizer then sub_rating >= β else sub_rating <= α of
+									True -> do
+										killermoves <- gets killerMoves
+										case move `elem` Map.findWithDefault [] rest_depth killermoves of
+											False -> modify $ \ s -> s { killerMoves = Map.alter
+												(Just . take numKillerMoves . (move:) . maybe [] id) rest_depth (killerMoves s) }
+											True  -> modify $ \ s -> s { killerMoveHits = killerMoveHits s + 1 }
+										modify $ \ s -> case maximizer of
+											True  -> s { βCutoffs = βCutoffs s + 1 }
+											False -> s { αCutoffs = αCutoffs s + 1 }
+										return (sub_rating,sub_line)
+									False -> do
+										SearchState{..} <- get
+										when (if maximizer then sub_rating > bestRating else sub_rating < bestRating ) $ do
+											modify $ \ s -> s {
+												bestLine   = sub_line,
+												bestRating = sub_rating }
+										try_moves moves (sub_rating,sub_line)
 	where
 	maximizer = pColourToMove == White
 
