@@ -10,8 +10,8 @@ import Data.Ord
 import Data.Char
 import Data.List
 import qualified Data.IntMap.Strict as Map
-import Data.Tuple
-import Data.NumInstances
+--import Data.Tuple
+--import Data.NumInstances
 import System.Random
 import Control.Monad.State.Strict
 import Text.Printf
@@ -26,15 +26,10 @@ data Colour = White | Black deriving (Show,Eq,Enum,Ord,Read,Generic)
 instance Hashable Colour
 nextColour White = Black
 nextColour Black = White
-data File = A | B | C | D | E | F | G | H
-	deriving (Show,Ix,Ord,Eq,Enum,Generic)
+data File = A | B | C | D | E | F | G | H deriving (Show,Eq,Enum,Generic,Ord,Ix)
 instance Hashable File
-data Rank = First | Second | Third | Fourth | Fifth | Sixth | Seventh | Eighth
-	deriving (Ix,Ord,Eq,Enum,Generic)
-instance Hashable Rank
-instance Show Rank where
-	show rank = show $ index (First,Eighth) rank + 1
-type Coors = (File,Rank)
+type Coors = (File,Int)
+
 type Board = Array Coors (Maybe (Colour,Piece))
 instance Hashable Board where
 	hashWithSalt salt board = hashWithSalt salt (assocs board)
@@ -51,15 +46,15 @@ data Position = Position {
 instance Hashable Position
 
 testPosition = Position {
-	pBoard = boardFromString [
-		"ØçØçØíØç",
-		"çâçØçØçØ",
-		"ØçØçØóØç",
-		"çØçØçØçÙ",
-		"ØçØçØçØç",
-		"çØçØçØç ",
-		"ØçØçØçØç",
-		"çØçØçØçØ" ],
+	pBoard = boardFromString $
+		"âçáòäçàñ" ++
+		"çßîßîßîß" ++
+		"ßçïðØçØç" ++
+		"çØçØîØçØ" ++
+		"ØçÛçÙçØç" ++
+		"çØçØçÝçØ" ++
+		"ÙèÙèØèÙè" ++
+		"ëÚêÝíÛéÜ",
 	pColourToMove       = Black,
 	pCanCastleQueenSide = [],
 	pCanCastleKingSide  = [],
@@ -68,15 +63,15 @@ testPosition = Position {
 	pMoveCounter        = 0 }
 
 initialPosition = Position {
-	pBoard = boardFromString [
-		"âïáòäðàñ",
-		"îßîßîßîß",
-		"ØçØçØçØç",
-		"çØçØçØçØ",
-		"ØçØçØçØç",
-		"çØçØçØçØ",
-		"ÙèÙèÙèÙè",
-		"ëÚêÝíÛéÜ" ],
+	pBoard = boardFromString $
+		"âïáòäðàñ" ++
+		"îßîßîßîß" ++
+		"ØçØçØçØç" ++
+		"çØçØçØçØ" ++
+		"ØçØçØçØç" ++
+		"çØçØçØçØ" ++
+		"ÙèÙèÙèÙè" ++
+		"ëÚêÝíÛéÜ",
 	pColourToMove       = White,
 	pCanCastleQueenSide = [White,Black],
 	pCanCastleKingSide  = [White,Black],
@@ -84,7 +79,7 @@ initialPosition = Position {
 	pHalfmoveClock      = 0,
 	pMoveCounter        = 0 }
 
-boardFromString s = listArray ((A,First),(H,Eighth)) $ map to_fig $ concat $ map reverse $ transpose s
+boardFromString s = array ((A,1),(H,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [A .. H] ] (map to_fig s)
 	where
 	to_fig c_rep = case c_rep of
 		c | c `elem` "ÙÚÛÜÝÞ" -> Just (White,toEnum (ord c - ord 'Ù'))
@@ -96,12 +91,11 @@ boardFromString s = listArray ((A,First),(H,Eighth)) $ map to_fig $ concat $ map
 instance Show Position where
 	show Position{..} = unlines $
 		[ "¿ÀÀÀÀÀÀÀÀÁ" ] ++
-		map show_rank [Eighth,Seventh .. First] ++
+		map show_rank [8,7..1] ++
 		[ "ÄÏÐÑÒÓÔÕÖÆ" ] ++
 		[ show pColourToMove ++ " to move" ]
 		where
-		show_rank rank = [ "ÇÈÉÊËÌÍÎ" !! fromEnum rank ] ++
-			map (show_square rank) [A .. H] ++ "Ã"
+		show_rank rank = [ "ÇÈÉÊËÌÍÎ" !! (rank-1) ] ++ map (show_square rank) [A .. H] ++ "Ã"
 		show_square rank file = case pBoard!(file,rank) of
 				Nothing            | darksquare -> 'ç'
 				Nothing                         -> 'Ø'
@@ -110,24 +104,23 @@ instance Show Position where
 				Just (Black,piece) | darksquare -> "îïðñòó" !! (fromEnum piece)
 				Just (Black,piece)              -> "ßàáâãä" !! (fromEnum piece)
 			where
-			darksquare = mod (fromEnum rank + fromEnum file) 2 == 0
+			darksquare = mod (rank + fromEnum file) 2 == 1
 
-infixl 6 +@
-(+@) :: Maybe Coors -> (Int,Int) -> Maybe Coors
-(Just (file,rank)) +@ (δfile,δrank) | ifile `elem` [0..7] && irank `elem` [0..7] =
-	Just (toEnum ifile,toEnum irank)
-	where
-	(ifile,irank) = (fromEnum file + δfile,fromEnum rank + δrank)
-_ +@ _ = Nothing
+infixl 6 +++
+(+++) :: Maybe Coors -> (Int,Int) -> Maybe Coors
+Nothing +++ _ = Nothing
+(Just (file,rank)) +++ (δfile,δrank) = case (fromEnum file + δfile, rank + δrank) of
+	(i_file',rank') | i_file' `elem` [0..7] && rank' `elem` [1..8] -> Just (toEnum i_file',rank')
+	_ -> Nothing
 
 instance Show Coors where
-	show (file,rank) = map toLower $ show file ++ show (fromEnum rank + 1)
+	show (file,rank) = map toLower (show file) ++ show rank
 
 data Move = Move {
 	moveFrom :: Coors, moveTo :: Coors, moveTakes :: Maybe Coors, movePromote :: Maybe Piece }
 	deriving (Eq,Ord)
 instance Show Move where
-	show Move{..} = show moveFrom ++ show moveTo ++ case movePromote of
+	show Move{..} = show moveFrom ++ (maybe "" (const "x") moveTakes) ++ show moveTo ++ case movePromote of
 		Nothing -> ""
 		Just Ú -> "N"
 		Just Û -> "B"
@@ -143,10 +136,10 @@ moveGen pos = filter (legal_move_wrt_check pos) $ moveTargets pos
 
 -- is colour's move ignoring check?
 legal_move_wrt_check pos move = all (coors_not_in_check pos' (pColourToMove pos)) $ case moveIsCastling pos move of
-	Just (Left White) ->  [(E,First), (D,First), (C,First) ]
-	Just (Right White) -> [(E,First), (F,First), (G,First) ]
-	Just (Left Black) ->  [(E,Eighth),(D,Eighth),(C,Eighth)]
-	Just (Right Black) -> [(E,Eighth),(F,Eighth),(G,Eighth)]
+	Just (Left White) ->  [(E,1),(D,1),(C,1)]
+	Just (Right White) -> [(E,1),(F,1),(G,1)]
+	Just (Left Black) ->  [(E,8),(D,8),(C,8)]
+	Just (Right Black) -> [(E,8),(F,8),(G,8)]
 	Nothing -> [ kings_coors pos' (pColourToMove pos) ]
 	where
 	pos' = doMove pos move
@@ -161,22 +154,23 @@ kings_coors pos colour = head [ coors | (coors,Just (col,Þ)) <- assocs (pBoard 
 -- Checks if colour's coors are threatened by the other player
 coors_not_in_check pos colour coors = all ((/=coors).moveTo) moves
 	where
-	board' = pBoard pos // [ (coors,Just (colour,Þ)) ] -- Place a figure on the square to also get pawn takes
-	moves = moveTargets $ pos { pColourToMove = nextColour colour, pBoard = board' }
+	boarD = pBoard pos // [ (coors,Just (colour,Þ)) ] -- Place a figure on the square to also get pawn takes
+	moves = moveTargets $ pos { pColourToMove = nextColour colour, pBoard = boarD }
 
 moveTargets pos@Position{..} = concatMap piece_moves (assocs pBoard)
 	where
 	(north,south,east,west) = ((0,1),(0,-1),(1,0),(-1,0))
 	diagonal = [ north+east,north+west,south+east,south+west ]
 	straight = [ north,west,south,east ]
+	knight's_moves = [ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
 	piece_moves (from,Just (col,piece)) | col == pColourToMove = case piece of
-		Ù -> maybe_move from ((Just from) +@ pawn_dir) ++
-			(case (Just from) +@ pawn_dir of
+		Ù -> maybe_move from ((Just from) +++ pawn_dir) ++
+			(case (Just from) +++ pawn_dir of
 				Just to -> case pBoard!to of
-					Nothing | snd from == pawn_row -> maybe_move from ((Just from) +@ 2*pawn_dir)
+					Nothing | snd from == pawn_row -> maybe_move from ((Just from) +++ 2*pawn_dir)
 					_ -> []) ++
-			concat [ maybe_take from ((Just from) +@ (pawn_dir+eastwest)) | eastwest <- [east,west] ]
-		Ú -> concatMap (try_move_to from) [ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
+			concat [ maybe_take from ((Just from) +++ (pawn_dir+eastwest)) | eastwest <- [east,west] ]
+		Ú -> concatMap (try_move_to from) knight's_moves
 		Û -> concatMap (rec_move 1 from) diagonal
 		Ü -> concatMap (rec_move 1 from) straight
 		Ý -> concatMap (rec_move 1 from) (diagonal++straight)
@@ -199,12 +193,12 @@ moveTargets pos@Position{..} = concatMap piece_moves (assocs pBoard)
 		moves -> moves
 
 	try_move_to :: Coors -> (Int,Int) -> [Move]
-	try_move_to from δ = maybe_move from ((Just from) +@ δ) ++ maybe_take from ((Just from) +@ δ)
+	try_move_to from δ = maybe_move from ((Just from) +++ δ) ++ maybe_take from ((Just from) +++ δ)
 
 	maybe_take from (Just to) = case pBoard!to of
 		Just (col,_) | col /= pColourToMove   -> [ Move from to (Just to) promo | promo <- promotions from to ]
 		Nothing | pEnPassantSquare == Just to -> [ Move from to ep_pawn Nothing ] where
-			ep_pawn = pEnPassantSquare +@ ( if pColourToMove==White then south else north )
+			ep_pawn = pEnPassantSquare +++ ( if pColourToMove==White then south else north )
 		_ -> []
 	maybe_take _ _ = []
 
@@ -214,11 +208,11 @@ moveTargets pos@Position{..} = concatMap piece_moves (assocs pBoard)
 	maybe_move _ _ = []
 
 	promotions from to = case (pBoard!from,to) of
-		(Just (_,Ù),(_,Eighth)) | pColourToMove==White -> map Just [Ú,Û,Ü,Ý]
-		(Just (_,Ù),(_,First))  | pColourToMove==Black -> map Just [Ú,Û,Ü,Ý]
+		(Just (_,Ù),(_,8)) | pColourToMove==White -> map Just [Ú,Û,Ü,Ý]
+		(Just (_,Ù),(_,1)) | pColourToMove==Black -> map Just [Ú,Û,Ü,Ý]
 		_ -> [ Nothing ]
 
-	(base_row,pawn_row) = if pColourToMove == White then (First,Second) else (Eighth,Seventh)
+	(base_row,pawn_row) = if pColourToMove == White then (1,2) else (8,7)
 	isEmpty coors = isNothing (pBoard!coors)
 	
 doMove pos@Position{..} mov@Move{..} = Position {
@@ -227,8 +221,8 @@ doMove pos@Position{..} mov@Move{..} = Position {
 	pCanCastleQueenSide = (if no_castling_queenside_any_more then delete pColourToMove else id) pCanCastleQueenSide,
 	pCanCastleKingSide  = (if no_castling_kingside_any_more  then delete pColourToMove else id) pCanCastleKingSide,
 	pEnPassantSquare    = case (moved_piece,moveFrom,moveTo) of
-		(Ù,(file,Second), (_,Fourth)) -> Just (file,Third)
-		(Ù,(file,Seventh),(_,Fifth )) -> Just (file,Sixth)
+		(Ù,(file,2),(_,4)) -> Just (file,3)
+		(Ù,(file,7),(_,5)) -> Just (file,6)
 		_ -> Nothing,
 	pHalfmoveClock      = if isJust moveTakes || moved_piece==Ù then 0 else pHalfmoveClock+1,
 	pMoveCounter        = pMoveCounter + 1 }
@@ -251,13 +245,14 @@ doMove pos@Position{..} mov@Move{..} = Position {
 		(Þ,(E,rank),(C,_)) -> move (A,rank) (D,rank)
 		_                   -> []
 
-	(no_castling_queenside_any_more,no_castling_kingside_any_more) = case (moveFrom,pColourToMove) of
-		_ | moved_piece==Þ -> (True, True )
-		((H,First), White)  -> (False,True )
-		((A,First), White)  -> (True ,False)
-		((H,Eighth),Black)  -> (False,True )
-		((A,Eighth),Black)  -> (True ,False)
-		_                   -> (False,False)
+	(no_castling_queenside_any_more,no_castling_kingside_any_more) =
+		case (moveFrom,pColourToMove) of
+			_ | moved_piece==Þ -> (True, True )
+			((H,1),White)       -> (False,True )
+			((A,1),White)       -> (True ,False)
+			((H,8),Black)       -> (False,True )
+			((A,8),Black)       -> (True ,False)
+			_                   -> (False,False)
 
 type Rating = Float
 wHITE_MATE = -10000.0 :: Float
@@ -279,7 +274,7 @@ rate pos | max_one_light_figure pos = (dRAW,Just $ Draw NoWinPossible)
 rate pos = (0.1*mobility + sum [ (if colour==White then id else negate) piece_val |
 	(coors@(file,_),Just (colour,piece)) <- assocs (pBoard pos),
 	let piece_val = case piece of
-		Ù -> 1 + case distance coors (file,if colour==White then Eighth else First) of
+		Ù -> 1 + case distance coors (file,if colour==White then 8 else 1) of
 			1 -> 4
 			2 -> 2
 			_ -> 0
@@ -401,20 +396,21 @@ searchM pos@Position{..} (progress_0,progress_width) rest_depth current_line (α
 							modify $ \ s -> s { positionHashtable = HashMap.insert pos (sub_rating,sub_line) (positionHashtable s) }
 							case (if maximizer then (>=) else (<=)) sub_rating best_rating of
 								False -> try_moves moves (best_rating,best_line)
-								True  -> case if maximizer then sub_rating >= β else sub_rating <= α of
+								True  -> case False of --case if maximizer then sub_rating >= β else sub_rating <= α of
 									True -> do
 										killermoves <- gets killerMoves
-										case move `elem` Map.findWithDefault [] rest_depth killermoves of
-											False -> modify $ \ s -> s { killerMoves = Map.alter
-												(Just . take numKillerMoves . (move:) . maybe [] id) rest_depth (killerMoves s) }
-											True  -> modify $ \ s -> s { killerMoveHits = killerMoveHits s + 1 }
+										-- killermoves nach wert sortiert halten!
+										when (move `elem` Map.findWithDefault [] rest_depth killermoves) $ do
+											modify $ \ s -> s { killerMoveHits = killerMoveHits s + 1 }
+										modify $ \ s -> s { killerMoves = Map.alter
+											(Just . take numKillerMoves . (move:) . maybe [] (delete move)) rest_depth (killerMoves s) }
 										modify $ \ s -> case maximizer of
 											True  -> s { βCutoffs = βCutoffs s + 1 }
 											False -> s { αCutoffs = αCutoffs s + 1 }
 										return (sub_rating,sub_line)
 									False -> do
 										SearchState{..} <- get
-										when (if maximizer then sub_rating > bestRating else sub_rating < bestRating ) $ do
+										when ( if maximizer then sub_rating > bestRating else sub_rating < bestRating ) $ do
 											modify $ \ s -> s {
 												bestLine   = sub_line,
 												bestRating = sub_rating }
