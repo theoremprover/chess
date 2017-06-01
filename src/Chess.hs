@@ -387,16 +387,19 @@ searchM pos@Position{..} (progress_0,progress_width) rest_depth current_line (α
 						where
 						gen_moves = moveGen pos
 						num_moves = fromIntegral $ length gen_moves
-						try_moves [] result = return result
+						try_moves [] result = do
+							liftIO $ withFile "log.txt" AppendMode $ \ h -> do
+								hPutStrLn h $ printf "%s= %s" (indent $ length current_line) (show result)
+							return result
 						try_moves (move:moves) (best_rating,best_line) = do
 							let progress = (progress_0+progress_width*(num_moves - (fromIntegral $ length moves + 1)) / num_moves,
 								progress_width/num_moves)
 							liftIO $ withFile "log.txt" AppendMode $ \ h -> do
-								hPutStr h $ printf "%s%s" (indent $ length current_line) (show move)
+								hPutStrLn h $ printf "%s%s" (indent $ length current_line) (show move)
 							(sub_rating,sub_line) <- searchM (doMove pos move) progress (rest_depth-1) (move:current_line) $
 								if maximizer then (best_rating,β) else (α,best_rating)
 							liftIO $ withFile "log.txt" AppendMode $ \ h -> do
-								hPutStrLn h $ printf " : %.2f" sub_rating
+								hPutStrLn h $ printf "%s-> %.2f" (indent $ length current_line) sub_rating
 							when (length current_line == 0) $ liftIO $ do
 								putStrLn $ "Current line: " ++ show current_line
 								putStrLn $ "Best line: " ++ show best_line
@@ -408,6 +411,8 @@ searchM pos@Position{..} (progress_0,progress_width) rest_depth current_line (α
 								False -> try_moves moves (best_rating,best_line)
 								True  -> case if maximizer then sub_rating >= β else sub_rating <= α of
 									True -> do  -- CUTOFF
+										liftIO $ withFile "log.txt" AppendMode $ \ h -> do
+											hPutStrLn h $ printf "%sCUTOFF: sub_rating=%.2f, alpha=%.2f, beta=%.2f" (indent $ length current_line) sub_rating α β
 										killermoves <- gets killerMoves
 										when (move `elem` (map snd (Map.findWithDefault [] rest_depth killermoves))) $ do
 											modify $ \ s -> s { killerMoveHits = killerMoveHits s + 1 }
