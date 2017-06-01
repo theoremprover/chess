@@ -13,6 +13,8 @@ import qualified Data.IntMap.Strict as Map
 --import Data.Tuple
 --import Data.NumInstances
 import System.Random
+import System.Directory
+import System.IO
 import Control.Monad.State.Strict
 import Text.Printf
 import System.CPUTime
@@ -381,7 +383,7 @@ searchM pos@Position{..} (progress_0,progress_width) rest_depth current_line (α
 						let
 							killer_moves = map snd $ Map.findWithDefault [] rest_depth killerMoves
 							sorted_moves = (gen_moves `intersect` killer_moves) ++ (gen_moves \\ killer_moves)
-						try_moves sorted_moves (if maximizer then α else β, [])
+						try_moves sorted_moves (if maximizer then wHITE_MATE else bLACK_MATE, []) --(if maximizer then α else β, [])
 						where
 						gen_moves = moveGen pos
 						num_moves = fromIntegral $ length gen_moves
@@ -389,8 +391,18 @@ searchM pos@Position{..} (progress_0,progress_width) rest_depth current_line (α
 						try_moves (move:moves) (best_rating,best_line) = do
 							let progress = (progress_0+progress_width*(num_moves - (fromIntegral $ length moves + 1)) / num_moves,
 								progress_width/num_moves)
+							liftIO $ withFile "log.txt" AppendMode $ \ h -> do
+								hPutStr h $ printf "%s%s" (indent $ length current_line) (show move)
 							(sub_rating,sub_line) <- searchM (doMove pos move) progress (rest_depth-1) (move:current_line) $
 								if maximizer then (best_rating,β) else (α,best_rating)
+							liftIO $ withFile "log.txt" AppendMode $ \ h -> do
+								hPutStrLn h $ printf " : %.2f" sub_rating
+							when (length current_line == 0) $ liftIO $ do
+								putStrLn $ "Current line: " ++ show current_line
+								putStrLn $ "Best line: " ++ show best_line
+								putStrLn $ "best_rating = " ++ show best_rating
+--								getLine
+								return ()
 							modify $ \ s -> s { positionHashtable = HashMap.insert pos (sub_rating,sub_line) (positionHashtable s) }
 							case (if maximizer then (>=) else (<=)) sub_rating best_rating of
 								False -> try_moves moves (best_rating,best_line)
@@ -410,6 +422,8 @@ searchM pos@Position{..} (progress_0,progress_width) rest_depth current_line (α
 	insert_killer_move rating move Nothing = Just [(rating,move)]
 	insert_killer_move rating move (Just killermoves) = Just $ take numKillerMoves $ nub $
 		(if maximizer then reverse else id) $ sort $ (rating,move):killermoves
+
+indent n = take (4*n) $ cycle "|   "
 
 main = do
 	loop 4 [initialPosition]
@@ -435,6 +449,7 @@ loop depth poss@(pos:lastpos) = do
 							"random" -> randomMatch pos
 							"q" -> return ()
 							"s" -> do
+								liftIO $ removeFile "log.txt"
 								((rating,moves),ss) <- startSearch depth pos
 								putStrLn $ "BEST LINE (" ++ show rating ++ "): " ++ show moves
 								printSearchStats ss
