@@ -22,6 +22,8 @@ import System.Time
 import Data.Hashable
 import qualified Data.HashMap.Strict as HashMap (insert,HashMap,empty,lookup,size)
 
+logging = False
+
 data Piece = Ù | Ú | Û | Ü | Ý | Þ deriving (Show,Eq,Enum,Ord,Generic)
 instance Hashable Piece
 data Colour = White | Black deriving (Show,Eq,Enum,Ord,Read,Generic)
@@ -347,7 +349,7 @@ type Depth = Int
 showLine linestr rating line = do
 	liftIO $ putStrLn $ linestr ++ " (" ++ (printf "%.2f" rating) ++ ") : " ++ show line
 
-searchM :: Position -> (Float,Float) -> Depth -> Line -> (Rating,Rating) -> SearchM (Rating,Line)
+searchM :: Position -> (Float,Float) -> Depth -> Line -> (Rating,Rating) -> SearchM (Maybe (Rating,Line))
 searchM pos@Position{..} (progress_0,progress_width) rest_depth current_line (α,β) = do
 	modify $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
 	let (rating,mb_matchresult) = rate pos
@@ -366,17 +368,17 @@ searchM pos@Position{..} (progress_0,progress_width) rest_depth current_line (α
 	case mb_matchresult of
 		Just _ -> do
 			modify $ \ s -> s { leavesEvaluated = leavesEvaluated s + 1 }
-			return (rating,current_line)
+			return $ Just (rating,current_line)
 		Nothing -> case rest_depth of
 			0 -> do
 				modify $ \ s -> s { leavesEvaluated = leavesEvaluated s + 1 }
-				return (rating,current_line)
+				return $ Just (rating,current_line)
 			_ -> do
 				posTable <- gets positionHashtable
 				case HashMap.lookup pos posTable of
 					Just (sub_rating,sub_line) -> do
 						modify $ \ s -> s { memoizationHits = memoizationHits s + 1 }
-						return (sub_rating,sub_line++current_line)
+						return $ Just (sub_rating,sub_line++current_line)
 					Nothing -> do
 						modify $ \ s -> s { memoizationMisses = memoizationMisses s + 1 }
 						SearchState{..} <- get
@@ -388,40 +390,39 @@ searchM pos@Position{..} (progress_0,progress_width) rest_depth current_line (α
 						gen_moves = moveGen pos
 						num_moves = fromIntegral $ length gen_moves
 						try_moves [] result = do
-							liftIO $ withFile "log.txt" AppendMode $ \ h -> do
-								hPutStrLn h $ printf "%s= %s" (indent $ length current_line) (show result)
-							return result
+							when logging $ do
+								liftIO $ withFile "log.txt" AppendMode $ \ h -> do
+									hPutStrLn h $ printf "%s= %s" (indent $ length current_line) (show result)
+							return $ Just result
 						try_moves (move:moves) (best_rating,best_line) = do
 							let progress = (progress_0+progress_width*(num_moves - (fromIntegral $ length moves + 1)) / num_moves,
 								progress_width/num_moves)
 							liftIO $ withFile "log.txt" AppendMode $ \ h -> do
 								hPutStrLn h $ printf "%s%s" (indent $ length current_line) (show move)
-							(sub_rating,sub_line) <- searchM (doMove pos move) progress (rest_depth-1) (move:current_line) $
+							mb_sub <- searchM (doMove pos move) progress (rest_depth-1) (move:current_line) $
 								if maximizer then (best_rating,β) else (α,best_rating)
-							liftIO $ withFile "log.txt" AppendMode $ \ h -> do
-								hPutStrLn h $ printf "%s-> %.2f" (indent $ length current_line) sub_rating
-							when (length current_line == 0) $ liftIO $ do
-								putStrLn $ "Current line: " ++ show current_line
-								putStrLn $ "Best line: " ++ show best_line
-								putStrLn $ "best_rating = " ++ show best_rating
---								getLine
-								return ()
-							modify $ \ s -> s { positionHashtable = HashMap.insert pos (sub_rating,sub_line) (positionHashtable s) }
-							case (if maximizer then (>=) else (<=)) sub_rating best_rating of
-								False -> try_moves moves (best_rating,best_line)
-								True  -> case if maximizer then sub_rating >= β else sub_rating <= α of
-									True -> do  -- CUTOFF
+							case mb_sub of
+								Nothing -> try_moves moves (best_rating,best_line)
+								Just (sub_rating,sub_line) -> do
+									when logging $ do
 										liftIO $ withFile "log.txt" AppendMode $ \ h -> do
-											hPutStrLn h $ printf "%sCUTOFF: sub_rating=%.2f, alpha=%.2f, beta=%.2f" (indent $ length current_line) sub_rating α β
-										killermoves <- gets killerMoves
-										when (move `elem` (map snd (Map.findWithDefault [] rest_depth killermoves))) $ do
-											modify $ \ s -> s { killerMoveHits = killerMoveHits s + 1 }
-										modify $ \ s -> s { killerMoves = Map.alter (insert_killer_move sub_rating move) rest_depth (killerMoves s) }
-										modify $ \ s -> case maximizer of
-											True  -> s { βCutoffs = βCutoffs s + 1 }
-											False -> s { αCutoffs = αCutoffs s + 1 }
-										return (sub_rating,sub_line)
-									False -> try_moves moves (sub_rating,sub_line)
+											hPutStrLn h $ printf "%s-> %.2f" (indent $ length current_line) sub_rating
+									modify $ \ s -> s { positionHashtable = HashMap.insert pos (sub_rating,sub_line) (positionHashtable s) }
+									case (if maximizer then (>=) else (<=)) sub_rating best_rating of
+										False -> try_moves moves (best_rating,best_line)
+										True  -> case if maximizer then sub_rating >= β else sub_rating <= α of
+											True -> do  -- CUTOFF
+												liftIO $ withFile "log.txt" AppendMode $ \ h -> do
+													hPutStrLn h $ printf "%sCUTOFF: sub_rating=%.2f, alpha=%.2f, beta=%.2f" (indent $ length current_line) sub_rating α β
+												killermoves <- gets killerMoves
+												when (move `elem` (map snd (Map.findWithDefault [] rest_depth killermoves))) $ do
+													modify $ \ s -> s { killerMoveHits = killerMoveHits s + 1 }
+												modify $ \ s -> s { killerMoves = Map.alter (insert_killer_move sub_rating move) rest_depth (killerMoves s) }
+												modify $ \ s -> case maximizer of
+													True  -> s { βCutoffs = βCutoffs s + 1 }
+													False -> s { αCutoffs = αCutoffs s + 1 }
+												return Nothing
+											False -> try_moves moves (sub_rating,sub_line)
 	where
 	maximizer = pColourToMove == White
 	insert_killer_move rating move Nothing = Just [(rating,move)]
@@ -454,8 +455,8 @@ loop depth poss@(pos:lastpos) = do
 							"random" -> randomMatch pos
 							"q" -> return ()
 							"s" -> do
-								liftIO $ removeFile "log.txt"
-								((rating,moves),ss) <- startSearch depth pos
+								when logging $ liftIO $ removeFile "log.txt"
+								(Just (rating,moves),ss) <- startSearch depth pos
 								putStrLn $ "BEST LINE (" ++ show rating ++ "): " ++ show moves
 								printSearchStats ss
 								loop depth (doMove pos (last moves) : poss)
