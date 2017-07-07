@@ -51,6 +51,28 @@ instance Hashable Position
 
 testPosition = Position {
 	pBoard = boardFromString $
+		"ØçØçØçØñ" ++
+		"çØçØçØçØ" ++
+		"ØçØçØçØç" ++
+		"çØçØçØçØ" ++
+		"ØçØçØçØç" ++
+		"çÛçäçØçØ" ++
+		"ØçØçØçØç" ++
+		"çØçÞçØçØ",
+	pColourToMove       = Black,
+	pCanCastleQueenSide = [],
+	pCanCastleKingSide  = [],
+	pEnPassantSquare    = Nothing,
+	pHalfmoveClock      = 0,
+	pMoveCounter        = 0 }
+{-
+ÙÚÛÜÝÞ"
+ßàáâãä"
+èéêëìí"
+îïðñòó"
+-}
+{-
+	pBoard = boardFromString $
 		"âçáòäçàñ" ++
 		"çßîßçßîß" ++
 		"ßçïðØçØç" ++
@@ -65,6 +87,7 @@ testPosition = Position {
 	pEnPassantSquare    = Nothing,
 	pHalfmoveClock      = 0,
 	pMoveCounter        = 0 }
+-}
 
 initialPosition = Position {
 	pBoard = boardFromString $
@@ -397,7 +420,7 @@ searchM pos@Position{..} (progress_0,progress_width) rest_depth current_line (α
 						try_moves (move:moves) (best_rating,best_line) = do
 							let progress = (progress_0+progress_width*(num_moves - (fromIntegral $ length moves + 1)) / num_moves,
 								progress_width/num_moves)
-							liftIO $ withFile "log.txt" AppendMode $ \ h -> do
+							when logging $ liftIO $ withFile "log.txt" AppendMode $ \ h -> do
 								hPutStrLn h $ printf "%s%s" (indent $ length current_line) (show move)
 							mb_sub <- searchM (doMove pos move) progress (rest_depth-1) (move:current_line) $
 								if maximizer then (best_rating,β) else (α,best_rating)
