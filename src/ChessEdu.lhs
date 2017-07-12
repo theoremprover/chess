@@ -47,7 +47,7 @@ the colour to move,
 the set of players that still have the right to castle queen side or king side,
 whether a pawn could be taken en passant in the next move,
 and a clock counting the half moves that have been made
-(chess rules say that the game is drawn if over 50+ half moves, no pawn is moved or piece is taken).
+(chess rules say that the game is drawn if for 50+ half moves, no pawn is moved or piece is taken).
 
 > data Position = Position {
 > 	pBoard              :: Board,
@@ -82,8 +82,8 @@ and the half move clock starts at zero:
 > allOfThem :: (Enum a,Bounded a,Ord a) => [a]
 > allOfThem = enumFromTo minBound maxBound
 
-The allOfThem function generates a set of all values of the respective type.
-In order to print a board, we define show functions.
+The allOfThem function generates a list of all values of the respective type.
+In order to print a board, we define a show_square function:
 
 > show_square darksquare square = case square of 
 > 	Nothing            | darksquare -> 'ç'
@@ -92,16 +92,22 @@ In order to print a board, we define show functions.
 > 	Just (White,piece)              -> "ÙÚÛÜÝÞ" !! (fromEnum piece)
 > 	Just (Black,piece) | darksquare -> "îïðñòó" !! (fromEnum piece)
 > 	Just (Black,piece)              -> "ßàáâãä" !! (fromEnum piece)
-> 
-> read_square c = fromJust $ lookup c $ ('ç',Nothing) : ('Ø',Nothing) :
->	[ (show_square dark square,square) | col <- allOfThem, piece <- allOfThem, let square = Just (col,piece), dark <- allOfThem ]
+
+read_square is the inverse of show_square, so we don't have to give both directions
+and thus have single source.
+
+> read_square :: Char -> Square
+> read_square c = lookup c [ (show_square dark (Just (col,piece)), (col,piece)) |
+>	col <- allOfThem, piece <- allOfThem, dark <- allOfThem ]
 
 > boardFromString s = array ((A,1),(H,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [A .. H] ] (map read_square s)
 
 The boardFromString convenience function converts a string to
 a board with pieces on it.
 The resulting board is an array with an index ranging from (A,1) to (H,8),
-starting from (A,8) in the left upper corner.
+starting from (A,8) in the upper left corner.
+
+In order to print a chess position, we make Position an instance of Show:
 
 > instance Show Position where
 > 	show Position{..} =
@@ -111,8 +117,7 @@ starting from (A,8) in the left upper corner.
 > 		show pColourToMove ++ " to move\n"
 > 		where
 > 		show_rank rank = [ "ÇÈÉÊËÌÍÎ" !! (fromEnum rank - 1) ] ++
->			[ show_square (darksquare file,rank) (pBoard!(file,rank)) | file <- [A .. H] ] ++ "Ã"
+>			[ show_square (is_darksquare (file,rank)) (pBoard!(file,rank)) | file <- [A .. H] ] ++ "Ã"
 > 			where
-> 			darksquare (file,rank) = mod (fromEnum rank + fromEnum file) 2 == 1
+> 			is_darksquare (file,rank) = mod (fromEnum rank + fromEnum file) 2 == 1
 
-We want to show a board position. 
