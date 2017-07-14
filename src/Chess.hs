@@ -147,19 +147,19 @@ data Move = Move {
 	moveFrom :: Coors, moveTo :: Coors, moveTakes :: Maybe Coors, movePromote :: Maybe Piece }
 	deriving (Eq,Ord)
 instance Show Move where
-	show Move{..} = show moveFrom ++ (maybe "" (const "x") moveTakes) ++ show moveTo ++ case movePromote of
+	show Move{..} = show moveFrom ++ maybe "" (const "x") moveTakes ++ show moveTo ++ case movePromote of
 		Nothing -> ""
 		Just Ú -> "N"
 		Just Û -> "B"
 		Just Ü -> "R"
 		Just Ý -> "Q"
 
+moveGen pos = filter (legal_move_wrt_check pos) $ moveTargets pos
+
 moveIsCastling Position{..} Move{..} = case (pBoard!moveFrom,moveFrom,moveTo) of
 	(Just (col,Þ),(E,_),(G,_)) -> Just (Right col)
 	(Just (col,Þ),(E,_),(C,_)) -> Just (Left col)
 	_ -> Nothing
-
-moveGen pos = filter (legal_move_wrt_check pos) $ moveTargets pos
 
 -- is colour's move ignoring check?
 legal_move_wrt_check pos move = all (coors_not_in_check pos' (pColourToMove pos)) $ case moveIsCastling pos move of

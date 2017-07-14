@@ -1,6 +1,6 @@
-We will use unicode symbols in the code and some other extensions...
+We will use unicode symbols in the code and some standard set of compiler extensions...
 
-> {-# LANGUAGE UnicodeSyntax,RecordWildCards #-}
+> {-# LANGUAGE UnicodeSyntax,RecordWildCards,TypeSynonymInstances,FlexibleInstances,OverlappingInstances #-}
 
 > module Main where
 > 
@@ -40,6 +40,9 @@ and the rank is an integer number.
 Hence, the coordinates are the (cartesian) product
 
 > type Coors = (File,Int)
+> instance Show Coors where
+>	show (file,rank) = map toLower (show file) ++ show rank
+
 
 A position in a chess game consists of
 the current board,
@@ -121,3 +124,94 @@ In order to print a chess position, we make Position an instance of Show:
 > 			where
 > 			is_darksquare (file,rank) = mod (fromEnum rank + fromEnum file) 2 == 1
 
+In order to calculate target square coordinates, we need to add indices to coordinates.
+Therefore we define a new infix operator, which is left associative and has precedence 6
+(same as the normal "+" operator).
+The target coordinates may be out of the board's bounds, which is indicated by "Nothing".
+
+> infixl 6 +++
+> (+++) :: Maybe Coors -> (Int,Int) -> Maybe Coors
+> Nothing          +++ _             = Nothing
+> Just (file,rank) +++ (δfile,δrank) | ifile' `elem` [0..7] && rank' `elem` [1..8]
+> 									 = Just (toEnum ifile',rank')
+>	where
+> 	(ifile',rank') = (fromEnum file + δfile, rank + δrank)
+
+A normal move goes from a coordinate to another coordinate, might take an opponent's piece,
+and might also promote a pawn to another piece.
+
+> data CastlingSide = Queenside | Kingside
+> data Move =
+>	NormalMove {
+> 		nMoveFrom    :: Coors,
+> 		nMoveTo      :: Coors,
+> 		nMoveTakes   :: Bool,
+> 		nMovePromote :: Maybe Piece } |
+>	Castling CastlingSide |
+>	EnPassant {
+>		epMoveFrom	:: Coors,
+>		epMoveTo    :: Coors,
+>		epMoveTakes :: Coors }
+>		
+> instance Show Move where
+> 	show NormalMove{..} = show nMoveFrom ++ if nMoveTakes then "" else "x" ++
+>		show nMoveTo ++ case nMovePromote of
+> 			Nothing -> ""
+> 			Just Ú -> "N"
+> 			Just Û -> "B"
+> 			Just Ü -> "R"
+> 			Just Ý -> "Q"
+>	show (Castling Queenside) = "O-O-O"
+>	show (Castling Kingside)  = "O-O"
+>	show EnPassant{..} = show epMoveFrom ++ "x" ++ show epMoveTakes ++ " e.p."
+
+> doMove pos@Position{..} move = pos' {
+> 	pCanCastleQueenSide = pCanCastleQueenSide 
+> 	pColourToMove  = nextColour pColourToMove,
+> 	pMoveCounter   = pMoveCounter + 1 }
+> 	where
+> 	pos' = case move of
+> 		NormalMove{..} -> pos {
+> 			pBoard = pBoard // [ (nMoveFrom,Nothing), (nMoveTo,pBoard!nMoveFrom) ],
+> 			
+
+
+
+doMove pos@Position{..} mov@Move{..} = Position {
+	pBoard				= pBoard // ( mb_take ++ move moveFrom moveTo ++ mb_castling ),
+	pColourToMove       = nextColour pColourToMove,
+	pCanCastleQueenSide = (if no_castling_queenside_any_more then delete pColourToMove else id) pCanCastleQueenSide,
+	pCanCastleKingSide  = (if no_castling_kingside_any_more  then delete pColourToMove else id) pCanCastleKingSide,
+	pEnPassantSquare    = case (moved_piece,moveFrom,moveTo) of
+		(Ù,(file,2),(_,4)) -> Just (file,3)
+		(Ù,(file,7),(_,5)) -> Just (file,6)
+		_ -> Nothing,
+	pHalfmoveClock      = if isJust moveTakes || moved_piece==Ù then 0 else pHalfmoveClock+1,
+	pMoveCounter        = pMoveCounter + 1 }
+
+	where
+
+	move from to = [ (from,Nothing), (to,target_piece) ] where
+		target_piece = case movePromote of
+			Nothing    -> pBoard!from
+			Just piece -> Just (pColourToMove,piece)
+
+	mb_take = case moveTakes of
+		Nothing    -> []
+		Just coors -> [ (coors,Nothing) ]
+
+	Just (_,moved_piece) = pBoard!moveFrom
+
+	mb_castling = case (moved_piece,moveFrom,moveTo) of
+		(Þ,(E,rank),(G,_)) -> move (H,rank) (F,rank)
+		(Þ,(E,rank),(C,_)) -> move (A,rank) (D,rank)
+		_                   -> []
+
+	(no_castling_queenside_any_more,no_castling_kingside_any_more) =
+		case (moveFrom,pColourToMove) of
+			_ | moved_piece==Þ -> (True, True )
+			((H,1),White)       -> (False,True )
+			((A,1),White)       -> (True ,False)
+			((H,8),Black)       -> (False,True )
+			((A,8),Black)       -> (True ,False)
+			_                   -> (False,False)
