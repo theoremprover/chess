@@ -59,7 +59,7 @@ and a clock counting the half moves that have been made
 > 	pCanCastleKingSide  :: Set Colour,
 > 	pEnPassantSquare    :: Maybe Coors,
 > 	pHalfmoveClock      :: Int }
-> 	deriving (Eq)
+>-- 	deriving Eq
 
 In the initial position, White is to start,
 with both players having all castling rights.
@@ -142,20 +142,16 @@ and might also promote a pawn to another piece.
 
 > data CastlingSide = Queenside | Kingside
 > data Move =
->	NormalMove {
-> 		nMoveFrom    :: Coors,
-> 		nMoveTo      :: Coors,
-> 		nMoveTakes   :: Bool,
-> 		nMovePromote :: Maybe Piece } |
->	Castling CastlingSide |
->	EnPassant {
->		epMoveFrom	:: Coors,
->		epMoveTo    :: Coors,
->		epMoveTakes :: Coors }
+>	Move {
+> 		moveFrom    :: Coors,
+> 		moveTo      :: Coors,
+> 		moveTakes   :: Maybe Coors,
+> 		movePromote :: Maybe Piece } |
+>	Castling CastlingSide
 >		
 > instance Show Move where
-> 	show NormalMove{..} = show nMoveFrom ++ if nMoveTakes then "" else "x" ++
->		show nMoveTo ++ case nMovePromote of
+> 	show Move{..} = show moveFrom ++ maybe "" (const "x") moveTakes ++
+>		show moveTo ++ case movePromote of
 > 			Nothing -> ""
 > 			Just Ú -> "N"
 > 			Just Û -> "B"
@@ -163,15 +159,24 @@ and might also promote a pawn to another piece.
 > 			Just Ý -> "Q"
 >	show (Castling Queenside) = "O-O-O"
 >	show (Castling Kingside)  = "O-O"
->	show EnPassant{..} = show epMoveFrom ++ "x" ++ show epMoveTakes ++ " e.p."
 
 > doMove pos@Position{..} move = pos' {
-> 	pCanCastleQueenSide = pCanCastleQueenSide 
+> 	pCanCastleQueenSide = if disabled_queenside then pCanCastleQueenSide else Set.delete pColourToMove pCanCastleQueenSide,
+> 	pCanCastleKingSide  = if disabled_kingside  then pCanCastleKingSide  else Set.delete pColourToMove pCanCastleKingSide,
 > 	pColourToMove  = nextColour pColourToMove,
 > 	pMoveCounter   = pMoveCounter + 1 }
 > 	where
+>	(disabled_queenside,disabled_kingside) = case (pColourToMove,move) of
+> 		(_,Castling _)         -> (False,False)
+> 		(White,Move (E,1) _ _) -> (False,False)
+> 		(Black,Move (E,8) _ _) -> (False,False)
+> 		(White,Move (A,1) _ _) -> (False,True)
+> 		(Black,Move (A,8) _ _) -> (True,False)
+> 		(White,Move (H,1) _ _) -> (False,True)
+> 		(Black,Move (H,8) _ _) -> (True,False)
+>		_					   -> (True,True),
 > 	pos' = case move of
-> 		NormalMove{..} -> pos {
+> 		Move{..} -> pos {
 > 			pBoard = pBoard // [ (nMoveFrom,Nothing), (nMoveTo,pBoard!nMoveFrom) ],
 > 			
 
