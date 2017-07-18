@@ -1,6 +1,6 @@
 We will use unicode symbols in the code and some standard set of compiler extensions...
 
-> {-# LANGUAGE UnicodeSyntax,RecordWildCards,TypeSynonymInstances,FlexibleInstances,OverlappingInstances #-}
+> {-# LANGUAGE UnicodeSyntax,RecordWildCards,TypeSynonymInstances,FlexibleInstances,OverlappingInstances,TupleSections #-}
 
 > module Main where
 > 
@@ -58,7 +58,8 @@ and a clock counting the half moves that have been made
 > 	pCanCastleQueenSide :: Set Colour,
 > 	pCanCastleKingSide  :: Set Colour,
 > 	pEnPassantSquare    :: Maybe Coors,
-> 	pHalfmoveClock      :: Int }
+> 	pHalfmoveClock      :: Int,
+>	pNextMoveNumber     :: Int }
 >-- 	deriving Eq
 
 In the initial position, White is to start,
@@ -80,7 +81,8 @@ and the half move clock starts at zero:
 > 	pCanCastleQueenSide = Set.fromList allOfThem,
 > 	pCanCastleKingSide  = Set.fromList allOfThem,
 > 	pEnPassantSquare    = Nothing,
-> 	pHalfmoveClock      = 0 }
+> 	pHalfmoveClock      = 0,
+>	pNextMoveNumber     = 1 }
 
 > allOfThem :: (Enum a,Bounded a,Ord a) => [a]
 > allOfThem = enumFromTo minBound maxBound
@@ -164,59 +166,32 @@ and might also promote a pawn to another piece.
 > 	pCanCastleQueenSide = if disabled_queenside then pCanCastleQueenSide else Set.delete pColourToMove pCanCastleQueenSide,
 > 	pCanCastleKingSide  = if disabled_kingside  then pCanCastleKingSide  else Set.delete pColourToMove pCanCastleKingSide,
 > 	pColourToMove  = nextColour pColourToMove,
-> 	pMoveCounter   = pMoveCounter + 1 }
+>	pHalfmoveClock = case move of
+>		Move _    _ (Just _) _ -> 0
+>		Move from _ _ _ | pBoard!from == Just (pColourToMove,Ù) -> 0
+>		_ -> pHalfmoveClock + 1,
+> 	pNextMoveNumber = pNextMoveNumber + 1 }
 > 	where
+>	moved_piece = case move of
+>		Castling _      -> Þ
+>		Move from _ _ _ -> fromJust $ pBoard!from
 >	(disabled_queenside,disabled_kingside) = case (pColourToMove,move) of
-> 		(_,Castling _)         -> (False,False)
-> 		(White,Move (E,1) _ _) -> (False,False)
-> 		(Black,Move (E,8) _ _) -> (False,False)
-> 		(White,Move (A,1) _ _) -> (False,True)
-> 		(Black,Move (A,8) _ _) -> (True,False)
-> 		(White,Move (H,1) _ _) -> (False,True)
-> 		(Black,Move (H,8) _ _) -> (True,False)
->		_					   -> (True,True),
-> 	pos' = case move of
-> 		Move{..} -> pos {
-> 			pBoard = pBoard // [ (nMoveFrom,Nothing), (nMoveTo,pBoard!nMoveFrom) ],
-> 			
+> 		(_,Castling _)           -> (False,False)
+> 		(White,Move (E,1) _ _ _) -> (False,False)
+> 		(Black,Move (E,8) _ _ _) -> (False,False)
+> 		(White,Move (A,1) _ _ _) -> (False,True )
+> 		(Black,Move (A,8) _ _ _) -> (True ,False)
+> 		(White,Move (H,1) _ _ _) -> (False,True )
+> 		(Black,Move (H,8) _ _ _) -> (True ,False)
+>		_					     -> (True ,True )
+> 	pos' = pos { pBoard = pBoard // case move of
+> 		Move{..} -> maybe [] (\ take_coors -> [(take_coors,Nothing)]) moveTakes ++
+>			[ (moveFrom,Nothing), (moveTo,maybe (pBoard!moveFrom) Just.(pColourToMove,) movePromote) ]
+> 		Castling Queenside -> [ ((A,r),Nothing), ((D,r),pBoard!(A,r)), ((E,r),Nothing), ((C,r),pBoard!(E,r)) ]
+> 		Castling Kingside  -> [ ((H,r),Nothing), ((F,r),pBoard!(H,r)), ((E,r),Nothing), ((G,r),pBoard!(E,r)) ] } where
+>		(r,_) = baseAndPawnRank pColourToMove
 
+The definition for the base and pawn start rank for each colour is needed above (and even more often):
 
-
-doMove pos@Position{..} mov@Move{..} = Position {
-	pBoard				= pBoard // ( mb_take ++ move moveFrom moveTo ++ mb_castling ),
-	pColourToMove       = nextColour pColourToMove,
-	pCanCastleQueenSide = (if no_castling_queenside_any_more then delete pColourToMove else id) pCanCastleQueenSide,
-	pCanCastleKingSide  = (if no_castling_kingside_any_more  then delete pColourToMove else id) pCanCastleKingSide,
-	pEnPassantSquare    = case (moved_piece,moveFrom,moveTo) of
-		(Ù,(file,2),(_,4)) -> Just (file,3)
-		(Ù,(file,7),(_,5)) -> Just (file,6)
-		_ -> Nothing,
-	pHalfmoveClock      = if isJust moveTakes || moved_piece==Ù then 0 else pHalfmoveClock+1,
-	pMoveCounter        = pMoveCounter + 1 }
-
-	where
-
-	move from to = [ (from,Nothing), (to,target_piece) ] where
-		target_piece = case movePromote of
-			Nothing    -> pBoard!from
-			Just piece -> Just (pColourToMove,piece)
-
-	mb_take = case moveTakes of
-		Nothing    -> []
-		Just coors -> [ (coors,Nothing) ]
-
-	Just (_,moved_piece) = pBoard!moveFrom
-
-	mb_castling = case (moved_piece,moveFrom,moveTo) of
-		(Þ,(E,rank),(G,_)) -> move (H,rank) (F,rank)
-		(Þ,(E,rank),(C,_)) -> move (A,rank) (D,rank)
-		_                   -> []
-
-	(no_castling_queenside_any_more,no_castling_kingside_any_more) =
-		case (moveFrom,pColourToMove) of
-			_ | moved_piece==Þ -> (True, True )
-			((H,1),White)       -> (False,True )
-			((A,1),White)       -> (True ,False)
-			((H,8),Black)       -> (False,True )
-			((A,8),Black)       -> (True ,False)
-			_                   -> (False,False)
+> baseAndPawnRank White = (1,2)
+> baseAndPawnRank Black = (8,7)
