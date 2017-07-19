@@ -133,9 +133,9 @@ The target coordinates may be out of the board's bounds, which is indicated by "
 
 > infixl 6 +++
 > (+++) :: Maybe Coors -> (Int,Int) -> Maybe Coors
-> Nothing          +++ _             = Nothing
-> Just (file,rank) +++ (δfile,δrank) | ifile' `elem` [0..7] && rank' `elem` [1..8]
-> 									 = Just (toEnum ifile',rank')
+> Just (file,rank) +++ (δfile,δrank)
+>	| ifile' `elem` [0..7] && rank' `elem` [1..8] = Just (toEnum ifile',rank')
+> _                +++ _                          = Nothing
 >	where
 > 	(ifile',rank') = (fromEnum file + δfile, rank + δrank)
 
@@ -163,8 +163,8 @@ and might also promote a pawn to another piece.
 >	show (Castling Kingside)  = "O-O"
 
 > doMove pos@Position{..} move = pos' {
-> 	pCanCastleQueenSide = if disabled_queenside then pCanCastleQueenSide else Set.delete pColourToMove pCanCastleQueenSide,
-> 	pCanCastleKingSide  = if disabled_kingside  then pCanCastleKingSide  else Set.delete pColourToMove pCanCastleKingSide,
+> 	pCanCastleQueenSide = if disabled_queenside then Set.delete pColourToMove pCanCastleQueenSide else pCanCastleQueenSide,
+> 	pCanCastleKingSide  = if disabled_kingside  then Set.delete pColourToMove pCanCastleKingSide  else pCanCastleKingSide,
 > 	pColourToMove  = nextColour pColourToMove,
 >	pHalfmoveClock = case move of
 >		Move _    _ (Just _) _ -> 0
@@ -172,26 +172,23 @@ and might also promote a pawn to another piece.
 >		_ -> pHalfmoveClock + 1,
 > 	pNextMoveNumber = pNextMoveNumber + 1 }
 > 	where
->	moved_piece = case move of
->		Castling _      -> Þ
->		Move from _ _ _ -> fromJust $ pBoard!from
 >	(disabled_queenside,disabled_kingside) = case (pColourToMove,move) of
-> 		(_,Castling _)           -> (False,False)
-> 		(White,Move (E,1) _ _ _) -> (False,False)
-> 		(Black,Move (E,8) _ _ _) -> (False,False)
-> 		(White,Move (A,1) _ _ _) -> (False,True )
+> 		(_,Castling _)           -> (True, True )
+> 		(White,Move (E,1) _ _ _) -> (True, True )
+> 		(Black,Move (E,8) _ _ _) -> (True, True )
+> 		(White,Move (A,1) _ _ _) -> (True, False)
 > 		(Black,Move (A,8) _ _ _) -> (True ,False)
 > 		(White,Move (H,1) _ _ _) -> (False,True )
-> 		(Black,Move (H,8) _ _ _) -> (True ,False)
->		_					     -> (True ,True )
+> 		(Black,Move (H,8) _ _ _) -> (False,True )
+>		_					     -> (False,False)
 > 	pos' = pos { pBoard = pBoard // case move of
 > 		Move{..} -> maybe [] (\ take_coors -> [(take_coors,Nothing)]) moveTakes ++
->			[ (moveFrom,Nothing), (moveTo,maybe (pBoard!moveFrom) Just.(pColourToMove,) movePromote) ]
+>			[ (moveFrom,Nothing), (moveTo,maybe (pBoard!moveFrom) (Just.(pColourToMove,)) movePromote) ]
 > 		Castling Queenside -> [ ((A,r),Nothing), ((D,r),pBoard!(A,r)), ((E,r),Nothing), ((C,r),pBoard!(E,r)) ]
 > 		Castling Kingside  -> [ ((H,r),Nothing), ((F,r),pBoard!(H,r)), ((E,r),Nothing), ((G,r),pBoard!(E,r)) ] } where
 >		(r,_) = baseAndPawnRank pColourToMove
 
-The definition for the base and pawn start rank for each colour is needed above (and even more often):
+The definition for the base and pawn start rank for each colour is needed above:
 
 > baseAndPawnRank White = (1,2)
 > baseAndPawnRank Black = (8,7)
