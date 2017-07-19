@@ -139,7 +139,8 @@ The target coordinates may be out of the board's bounds, which is indicated by "
 >	where
 > 	(ifile',rank') = (fromEnum file + δfile, rank + δrank)
 
-A normal move goes from a coordinate to another coordinate, might take an opponent's piece,
+A move is from a coordinate to another coordinate, might take an opponent's piece
+(for en passant, from another coordinate that the target),
 and might also promote a pawn to another piece.
 
 > data CastlingSide = Queenside | Kingside
@@ -192,3 +193,55 @@ The definition for the base and pawn start rank for each colour is needed above:
 
 > baseAndPawnRank White = (1,2)
 > baseAndPawnRank Black = (8,7)
+
+In a chess match, either one colour wins or it is a draw for some reason.
+
+> data MatchResult = Resignation Colour | WinnerMate Colour | Draw Reason --deriving (Eq,Show,Ord)
+
+
+
+> data Reason = Fifty_Halfmoves | Stalemate | NoWinPossible | Agreed --deriving (Eq,Show,Ord)
+
+The rating of a position is a float number
+
+> type Rating = Float
+> mIN   = -10000.0
+> mAX   =  10000.0
+> eQUAL =      0.0
+
+> rate :: Position -> (Rating,Maybe MatchResult)
+> rate Position{..} | pHalfmoveClock >= 50 = (eQUAL,Just $ Draw Fifty_Halfmoves)
+> rate pos | null (moveGen pos) = case no_check pos of
+> 	True -> (eQUAL,Just $ Draw Stalemate)
+> 	False -> case pColourToMove pos of
+> 		White -> (mIN,Just $ WinnerMate Black)
+> 		Black -> (mAX,Just $ WinnerMate White)
+> rate pos | max_one_light_figure pos = (dRAW,Just $ Draw NoWinPossible)
+> rate pos = (0.1*mobility + sum [ (if colour==White then id else negate) piece_val |
+> 	(coors@(file,_),Just (colour,piece)) <- assocs (pBoard pos),
+> 	let piece_val = case piece of
+> 		Ù -> 1 + case distance coors (file,if colour==White then 8 else 1) of
+> 			1 -> 4
+> 			2 -> 2
+> 			_ -> 0
+> 		Ú -> 3
+> 		Û -> 3
+> 		Ü -> 5
+> 		Ý -> 9
+> 		Þ -> 0 ],Nothing)
+> 	where
+> 	distance (file1,rank1) (file2,rank2) =
+> 		max (abs (fromEnum file1 - fromEnum file2)) (abs (fromEnum rank1 - fromEnum rank2))
+> 	mobility :: Rating
+> 	mobility = fromIntegral $
+> 		length (moveTargets $ pos { pColourToMove = White }) -
+> 		length (moveTargets $ pos { pColourToMove = Black })
+> 
+> max_one_light_figure Position{..} = case sort $ filter ((/=Þ).snd) $ catMaybes $ elems pBoard of
+> 	[]                                                                    -> True
+> 	[(_,fig)]                 | all light_figures [fig]                       -> True
+> 	[(col1,fig1),(col2,fig2)] | all light_figures [fig1,fig2] && col1 /= col2 -> True
+> 	_                                                                     -> False
+> 	where
+> 	light_figures = `elem` [Ú,Û]
+
