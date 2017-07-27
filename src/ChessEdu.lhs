@@ -8,6 +8,8 @@ We will use unicode symbols in the code and some standard set of compiler extens
 > import qualified Data.Set as Set
 > import Data.Char
 > import Data.Array
+> import Data.Maybe
+> import Data.List
 
 In chess, two players
 
@@ -132,12 +134,11 @@ Therefore we define a new infix operator, which is left associative and has prec
 The target coordinates may be out of the board's bounds, which is indicated by "Nothing".
 
 > infixl 6 +++
-> (+++) :: Maybe Coors -> (Int,Int) -> Maybe Coors
-> Just (file,rank) +++ (δfile,δrank)
->	| ifile' `elem` [0..7] && rank' `elem` [1..8] = Just (toEnum ifile',rank')
-> _                +++ _                          = Nothing
->	where
+> (+++) :: Coors -> (Int,Int) -> Maybe Coors
+> (file,rank) +++ (δfile,δrank) | ifile' `elem` [0..7] && rank' `elem` [1..8] = Just (toEnum ifile',rank')
+> 	where
 > 	(ifile',rank') = (fromEnum file + δfile, rank + δrank)
+> _  +++ _ = Nothing
 
 A move is from a coordinate to another coordinate, might take an opponent's piece
 (for en passant, from another coordinate that the target),
@@ -167,9 +168,13 @@ and might also promote a pawn to another piece.
 > 	pCanCastleQueenSide = if disabled_queenside then Set.delete pColourToMove pCanCastleQueenSide else pCanCastleQueenSide,
 > 	pCanCastleKingSide  = if disabled_kingside  then Set.delete pColourToMove pCanCastleKingSide  else pCanCastleKingSide,
 > 	pColourToMove  = nextColour pColourToMove,
+
+The halfmove clock counts the number of consecutive moves without a pawn move or
+taking a piece. After 50 such "half"moves the match is drawn.
+
 >	pHalfmoveClock = case move of
 >		Move _    _ (Just _) _ -> 0
->		Move from _ _ _ | pBoard!from == Just (pColourToMove,Ù) -> 0
+>		Move from _ _ _ | Just (_,Ù) <- pBoard!from -> 0
 >		_ -> pHalfmoveClock + 1,
 > 	pNextMoveNumber = pNextMoveNumber + 1 }
 > 	where
@@ -194,15 +199,14 @@ The definition for the base and pawn start rank for each colour is needed above:
 > baseAndPawnRank White = (1,2)
 > baseAndPawnRank Black = (8,7)
 
-In a chess match, either one colour wins or it is a draw for some reason.
+In a chess match, either one colour checkmates or it is a draw for some reason
+(one could also resign, of course...)
 
-> data MatchResult = Resignation Colour | WinnerMate Colour | Draw Reason --deriving (Eq,Show,Ord)
+> data MatchResult = Winner Colour WinReason | Draw DrawReason --deriving (Eq,Show,Ord)
+> data WinReason  = Resignation | Checkmate
+> data DrawReason = Fifty_Halfmoves | Stalemate | NoWinPossible --deriving (Eq,Show,Ord)
 
-
-
-> data Reason = Fifty_Halfmoves | Stalemate | NoWinPossible | Agreed --deriving (Eq,Show,Ord)
-
-The rating of a position is a float number
+The rating of a position is a float number in the range from -10000 to 10000.
 
 > type Rating = Float
 > mIN   = -10000.0
@@ -210,17 +214,38 @@ The rating of a position is a float number
 > eQUAL =      0.0
 
 > rate :: Position -> (Rating,Maybe MatchResult)
+
+If there is no pawn moved or piece taken for 50 halfmoves,
+the game is drawn:
+
 > rate Position{..} | pHalfmoveClock >= 50 = (eQUAL,Just $ Draw Fifty_Halfmoves)
-> rate pos | null (moveGen pos) = case no_check pos of
+
+If there is no legal move for one colour, we have either a stalemate,
+or a checkmate if the king is in check:
+
+> rate pos | null (moveGen pos) = case notInCheck pos of
 > 	True -> (eQUAL,Just $ Draw Stalemate)
 > 	False -> case pColourToMove pos of
-> 		White -> (mIN,Just $ WinnerMate Black)
-> 		Black -> (mAX,Just $ WinnerMate White)
-> rate pos | max_one_light_figure pos = (dRAW,Just $ Draw NoWinPossible)
+> 		White -> (mIN,Just $ Winner Black Checkmate)
+> 		Black -> (mAX,Just $ Winner White Checkmate)
+
+With only one bishop or knight (i.e. "light figures"), neither side can win:
+
+> rate pos | max_one_light_figure pos = (eQUAL,Just $ Draw NoWinPossible) where
+> 	max_one_light_figure Position{..} = case sort $ filter ((/=Þ).snd) $ catMaybes $ elems pBoard of
+> 		[]                                                                       -> True
+> 		[(_,fig)]                 | light_figure fig                             -> True
+> 		[(col1,fig1),(col2,fig2)] | all light_figure [fig1,fig2] && col1 /= col2 -> True
+> 		_                                                                        -> False
+> 	light_figure f = f `elem` [Ú,Û]
+
+Otherwise, we will rate the position based on material, distance of pawns from promotion,
+and the mobility of each piece.
+
 > rate pos = (0.1*mobility + sum [ (if colour==White then id else negate) piece_val |
-> 	(coors@(file,_),Just (colour,piece)) <- assocs (pBoard pos),
+> 	((_,rank),Just (colour,piece)) <- assocs (pBoard pos),
 > 	let piece_val = case piece of
-> 		Ù -> 1 + case distance coors (file,if colour==White then 8 else 1) of
+> 		Ù -> 1 + case if colour==White then 8-rank else rank-1 of
 > 			1 -> 4
 > 			2 -> 2
 > 			_ -> 0
@@ -228,20 +253,58 @@ The rating of a position is a float number
 > 		Û -> 3
 > 		Ü -> 5
 > 		Ý -> 9
-> 		Þ -> 0 ],Nothing)
+> 		Þ -> 0 ], Nothing)
 > 	where
-> 	distance (file1,rank1) (file2,rank2) =
-> 		max (abs (fromEnum file1 - fromEnum file2)) (abs (fromEnum rank1 - fromEnum rank2))
-> 	mobility :: Rating
 > 	mobility = fromIntegral $
-> 		length (moveTargets $ pos { pColourToMove = White }) -
-> 		length (moveTargets $ pos { pColourToMove = Black })
-> 
-> max_one_light_figure Position{..} = case sort $ filter ((/=Þ).snd) $ catMaybes $ elems pBoard of
-> 	[]                                                                    -> True
-> 	[(_,fig)]                 | all light_figures [fig]                       -> True
-> 	[(col1,fig1),(col2,fig2)] | all light_figures [fig1,fig2] && col1 /= col2 -> True
-> 	_                                                                     -> False
-> 	where
-> 	light_figures = `elem` [Ú,Û]
+> 		length (potentialMoves $ pos { pColourToMove = White }) -
+> 		length (potentialMoves $ pos { pColourToMove = Black })
 
+The move generator generates all legal moves in a position by first calculating
+all potential moves and then filtering out the moves that are not allowed
+because the king would be in check.
+
+> moveGen pos@Position{..} = filter king_not_in_check $ potentialMoves pos
+>	where
+> 	king_not_in_check move = all (coorsNotInCheck pos_after_move pColourToMove) $ case move of
+>		Castling Queenside -> [(E,r),(D,r),(C,r)]
+>		Castling Kingside  -> [(E,r),(F,r),(G,r)]
+>		Move{..}           -> [ kingsCoors pos_after_move pColourToMove ]
+>		where
+>		(r,_) = baseAndPawnRank pColourToMove
+>		pos_after_move = doMove pos move
+
+Is a square threatened by a piece of a given colour?
+
+> coorsNotInCheck pos colour coors = not $ any [ moveTo==coors |
+> 	Move{..} <- potentialMoves $ pos {
+> 		-- Say, the next colour would be to move now...
+> 		pColourToMove = nextColour colour,
+>		-- ... and place some figure at the coors to also get pawn takes:
+> 		pBoard = pBoard pos // [ (coors,Just (colour,Ý)) ] } ]
+
+> notInCheck pos@Position{..} = coorsNotInCheck pos pColourToMove $ kingsCoors pos pColourToMove
+
+> kingsCoors pos colour = head [ coors | (coors,Just (col,Þ)) <- assocs (pBoard pos), col == colour ]
+
+> potentialMoves pos@Position{..} = [ Move move_from move_to mb_takes mb_promote |
+>	(move_from,Just (colour,piece)) <- assocs pBoard, colour==pColourToMove,
+>	move_to <- case piece of
+>		Ù -> maybe_move pawn_dir ++ maybe_take (pawn_dir+east) ++ maybe_take (pawn_dir+west) ++ case ...
+>		Ú -> map maybe_move knight_moves
+>		Û -> map direction diagonals
+>		Ü -> map direction straights
+>		Ý -> map direction (straights++diagonals)
+>		Þ -> map maybe_move (straights++diagonals)
+>		
+> 		where
+> 		(north,south,east,west) = ((0,1),(0,-1),(1,0),(-1,0))
+> 		diagonals = [ north+east,north+west,south+east,south+west ]
+> 		straights = [ north,west,south,east ]
+> 		knight_moves = [ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
+> 		maybe_move δ = case move_from +++ δ of
+>			Nothing -> []
+>			Just move_to -> case pBoard!move_to of
+>				Nothing -> [ Move move_from move_to Nothing Nothing ]
+>				Just (col,_) | col /= pColourToMove = [ Move move_from move_to (Just move_to) Nothing ]
+>				_ -> []
+>		direction δ = map 
