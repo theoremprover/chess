@@ -192,12 +192,7 @@ taking a piece. After 50 such "half"moves the match is drawn.
 >			[ (moveFrom,Nothing), (moveTo,maybe (pBoard!moveFrom) (Just.(pColourToMove,)) movePromote) ]
 > 		Castling Queenside -> [ ((A,r),Nothing), ((D,r),pBoard!(A,r)), ((E,r),Nothing), ((C,r),pBoard!(E,r)) ]
 > 		Castling Kingside  -> [ ((H,r),Nothing), ((F,r),pBoard!(H,r)), ((E,r),Nothing), ((G,r),pBoard!(E,r)) ] } where
->		(r,_) = baseAndPawnRank pColourToMove
-
-The definition for the base and pawn start rank for each colour is needed above:
-
-> baseAndPawnRank White = (1,2)
-> baseAndPawnRank Black = (8,7)
+>		r = if pColourToMove==White then 1 else 8
 
 In a chess match, either one colour checkmates or it is a draw for some reason
 (one could also resign, of course...)
@@ -229,7 +224,7 @@ or a checkmate if the king is in check:
 > 		White -> (mIN,Just $ Winner Black Checkmate)
 > 		Black -> (mAX,Just $ Winner White Checkmate)
 
-With only one bishop or knight (i.e. "light figures"), neither side can win:
+With only one bishop or knight ("light figure"), neither side can win:
 
 > rate pos | max_one_light_figure pos = (eQUAL,Just $ Draw NoWinPossible) where
 > 	max_one_light_figure Position{..} = case sort $ filter ((/=Þ).snd) $ catMaybes $ elems pBoard of
@@ -266,16 +261,16 @@ because the king would be in check.
 > moveGen pos@Position{..} = filter king_not_in_check $ potentialMoves pos
 >	where
 > 	king_not_in_check move = all (coorsNotInCheck pos_after_move pColourToMove) $ case move of
->		Castling Queenside -> [(E,r),(D,r),(C,r)]
->		Castling Kingside  -> [(E,r),(F,r),(G,r)]
+>		Castling Queenside -> [(E,base_rank),(D,base_rank),(C,base_rank)]
+>		Castling Kingside  -> [(E,base_rank),(F,base_rank),(G,base_rank)]
 >		Move{..}           -> [ kingsCoors pos_after_move pColourToMove ]
 >		where
->		(r,_) = baseAndPawnRank pColourToMove
+>		base_rank = if pColourToMove==White then 1 else 8
 >		pos_after_move = doMove pos move
 
 Is a square threatened by a piece of a given colour?
 
-> coorsNotInCheck pos colour coors = not $ any [ moveTo==coors |
+> coorsNotInCheck pos colour coors = not $ any (==coors) [ moveTo |
 > 	Move{..} <- potentialMoves $ pos {
 > 		-- Say, the next colour would be to move now...
 > 		pColourToMove = nextColour colour,
@@ -287,24 +282,66 @@ Is a square threatened by a piece of a given colour?
 > kingsCoors pos colour = head [ coors | (coors,Just (col,Þ)) <- assocs (pBoard pos), col == colour ]
 
 > potentialMoves pos@Position{..} = [ Move move_from move_to mb_takes mb_promote |
->	(move_from,Just (colour,piece)) <- assocs pBoard, colour==pColourToMove,
->	move_to <- case piece of
->		Ù -> maybe_move pawn_dir ++ maybe_take (pawn_dir+east) ++ maybe_take (pawn_dir+west) ++ case ...
->		Ú -> map maybe_move knight_moves
->		Û -> map direction diagonals
->		Ü -> map direction straights
->		Ý -> map direction (straights++diagonals)
->		Þ -> map maybe_move (straights++diagonals)
->		
-> 		where
+>	(move_from@(_,from_rank),Just (colour,piece)) <- assocs pBoard, colour==pColourToMove,
+>	(move_to@(_,to_rank),mb_takes) <- let
+>		initial_rank = if pColourToMove==White then 2 else 7
+>		pawn_dir = if pColourToMove==White then north else south
 > 		(north,south,east,west) = ((0,1),(0,-1),(1,0),(-1,0))
 > 		diagonals = [ north+east,north+west,south+east,south+west ]
 > 		straights = [ north,west,south,east ]
-> 		knight_moves = [ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
-> 		maybe_move δ = case move_from +++ δ of
+>	 	knight_moves = [ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
+>		maybe_move from δ = case from +++ δ of
 >			Nothing -> []
 >			Just move_to -> case pBoard!move_to of
->				Nothing -> [ Move move_from move_to Nothing Nothing ]
->				Just (col,_) | col /= pColourToMove = [ Move move_from move_to (Just move_to) Nothing ]
+>				Nothing -> [ (move_to,Nothing) ]
+>				Just (col,_) | col /= pColourToMove -> [ (move_to,Just move_to) ]
 >				_ -> []
->		direction δ = map 
+>		maybe_move_direction from δ = case maybe_move from δ of
+>			move@[ (_,Just _) ]          -> move
+>			move@[ (to,Nothing) ] -> move ++ maybe_move_direction to δ
+>			_ -> []
+>		in case piece of
+>			Ù -> ( case move_from +++ pawn_dir of
+
+If the square in front of the pawn direction is empty, it could move there:
+
+>				Just move_to | Nothing <- pBoard!move_to -> [ (move_to,Nothing) ] ++
+
+If, moreover, the pawn still stands on its initial position, it could even move two squares
+given that this target square is also empty:
+
+>					case move_from +++ 2*pawn_dir of
+>						Just move_to2 | Nothing <- pBoard!move_to2, from_rank==initial_rank -> [ (move_to2,Nothing) ]
+>						_ -> []
+>				Nothing -> [] ) ++
+
+A pawn can take pieces diagonally in front of it:
+
+>				[ (move_to,Just move_to) | Just move_to <- map (move_from +++) [pawn_dir+east,pawn_dir+west],
+>					pBoard!move_to /= Nothing ]
+
+For a knight, there is a fixed set of target squares.
+
+>			Ú -> concatMap (maybe_move           move_from) knight_moves
+
+A bishop can move from its location in each of the diagonals' direction:
+
+>			Û -> concatMap (maybe_move_direction move_from) diagonals
+
+Same for rooks, but in straight direction:
+
+>			Ü -> concatMap (maybe_move_direction move_from) straights
+
+The queen can move is each direction.
+
+>			Ý -> concatMap (maybe_move_direction move_from) (straights++diagonals)
+
+The king can only move one step, but also in each direction.
+
+>			Þ -> concatMap (maybe_move           move_from) (straights++diagonals),
+
+Only a pawn will be promoted to a piece once it reaches the opposite base rank:
+
+>	mb_promote <- case piece of
+>		Ù | to_rank == if pColourToMove==White then 8 else 1 -> map Just [Ý,Ú,Û,Ü]
+>		_ -> [ Nothing ] ]
