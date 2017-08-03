@@ -1,3 +1,5 @@
+%include lhs2TeX.fmt
+
 We will use unicode symbols in the code and some standard set of compiler extensions...
 
 > {-# LANGUAGE UnicodeSyntax,RecordWildCards,TypeSynonymInstances,FlexibleInstances,OverlappingInstances,TupleSections #-}
@@ -10,6 +12,8 @@ We will use unicode symbols in the code and some standard set of compiler extens
 > import Data.Array
 > import Data.Maybe
 > import Data.List
+> import Data.Stack
+> import Data.NumInstances
 
 In chess, two players
 
@@ -86,10 +90,17 @@ and the half move clock starts at zero:
 > 	pHalfmoveClock      = 0,
 >	pNextMoveNumber     = 1 }
 
+The allOfThem function generates a list of all values of the respective type,
+which is needed above.
+
 > allOfThem :: (Enum a,Bounded a,Ord a) => [a]
 > allOfThem = enumFromTo minBound maxBound
 
-The allOfThem function generates a list of all values of the respective type.
+Castling and promotion happen on base ranks:
+
+> baseRank White = 1
+> baseRank Black = 8
+
 In order to print a board, we define a show_square function:
 
 > show_square darksquare square = case square of 
@@ -192,7 +203,7 @@ taking a piece. After 50 such "half"moves the match is drawn.
 >			[ (moveFrom,Nothing), (moveTo,maybe (pBoard!moveFrom) (Just.(pColourToMove,)) movePromote) ]
 > 		Castling Queenside -> [ ((A,r),Nothing), ((D,r),pBoard!(A,r)), ((E,r),Nothing), ((C,r),pBoard!(E,r)) ]
 > 		Castling Kingside  -> [ ((H,r),Nothing), ((F,r),pBoard!(H,r)), ((E,r),Nothing), ((G,r),pBoard!(E,r)) ] } where
->		r = if pColourToMove==White then 1 else 8
+>		r = baseRank pColourToMove
 
 In a chess match, either one colour checkmates or it is a draw for some reason
 (one could also resign, of course...)
@@ -201,59 +212,6 @@ In a chess match, either one colour checkmates or it is a draw for some reason
 > data WinReason  = Resignation | Checkmate
 > data DrawReason = Fifty_Halfmoves | Stalemate | NoWinPossible --deriving (Eq,Show,Ord)
 
-The rating of a position is a float number in the range from -10000 to 10000.
-
-> type Rating = Float
-> mIN   = -10000.0
-> mAX   =  10000.0
-> eQUAL =      0.0
-
-> rate :: Position -> (Rating,Maybe MatchResult)
-
-If there is no pawn moved or piece taken for 50 halfmoves,
-the game is drawn:
-
-> rate Position{..} | pHalfmoveClock >= 50 = (eQUAL,Just $ Draw Fifty_Halfmoves)
-
-If there is no legal move for one colour, we have either a stalemate,
-or a checkmate if the king is in check:
-
-> rate pos | null (moveGen pos) = case notInCheck pos of
-> 	True -> (eQUAL,Just $ Draw Stalemate)
-> 	False -> case pColourToMove pos of
-> 		White -> (mIN,Just $ Winner Black Checkmate)
-> 		Black -> (mAX,Just $ Winner White Checkmate)
-
-With only one bishop or knight ("light figure"), neither side can win:
-
-> rate pos | max_one_light_figure pos = (eQUAL,Just $ Draw NoWinPossible) where
-> 	max_one_light_figure Position{..} = case sort $ filter ((/=Þ).snd) $ catMaybes $ elems pBoard of
-> 		[]                                                                       -> True
-> 		[(_,fig)]                 | light_figure fig                             -> True
-> 		[(col1,fig1),(col2,fig2)] | all light_figure [fig1,fig2] && col1 /= col2 -> True
-> 		_                                                                        -> False
-> 	light_figure f = f `elem` [Ú,Û]
-
-Otherwise, we will rate the position based on material, distance of pawns from promotion,
-and the mobility of each piece.
-
-> rate pos = (0.1*mobility + sum [ (if colour==White then id else negate) piece_val |
-> 	((_,rank),Just (colour,piece)) <- assocs (pBoard pos),
-> 	let piece_val = case piece of
-> 		Ù -> 1 + case if colour==White then 8-rank else rank-1 of
-> 			1 -> 4
-> 			2 -> 2
-> 			_ -> 0
-> 		Ú -> 3
-> 		Û -> 3
-> 		Ü -> 5
-> 		Ý -> 9
-> 		Þ -> 0 ], Nothing)
-> 	where
-> 	mobility = fromIntegral $
-> 		length (potentialMoves $ pos { pColourToMove = White }) -
-> 		length (potentialMoves $ pos { pColourToMove = Black })
-
 The move generator generates all legal moves in a position by first calculating
 all potential moves and then filtering out the moves that are not allowed
 because the king would be in check.
@@ -261,11 +219,11 @@ because the king would be in check.
 > moveGen pos@Position{..} = filter king_not_in_check $ potentialMoves pos
 >	where
 > 	king_not_in_check move = all (coorsNotInCheck pos_after_move pColourToMove) $ case move of
->		Castling Queenside -> [(E,base_rank),(D,base_rank),(C,base_rank)]
->		Castling Kingside  -> [(E,base_rank),(F,base_rank),(G,base_rank)]
+>		Castling Queenside -> [(E,r),(D,r),(C,r)]
+>		Castling Kingside  -> [(E,r),(F,r),(G,r)]
 >		Move{..}           -> [ kingsCoors pos_after_move pColourToMove ]
 >		where
->		base_rank = if pColourToMove==White then 1 else 8
+>		r = baseRank pColourToMove
 >		pos_after_move = doMove pos move
 
 Is a square threatened by a piece of a given colour?
@@ -285,7 +243,7 @@ Is a square threatened by a piece of a given colour?
 >	(move_from@(_,from_rank),Just (colour,piece)) <- assocs pBoard, colour==pColourToMove,
 >	(move_to@(_,to_rank),mb_takes) <- let
 >		initial_rank = if pColourToMove==White then 2 else 7
->		pawn_dir = if pColourToMove==White then north else south
+>		pawn_dir     = if pColourToMove==White then north else south
 > 		(north,south,east,west) = ((0,1),(0,-1),(1,0),(-1,0))
 > 		diagonals = [ north+east,north+west,south+east,south+west ]
 > 		straights = [ north,west,south,east ]
@@ -343,5 +301,72 @@ The king can only move one step, but also in each direction.
 Only a pawn will be promoted to a piece once it reaches the opposite base rank:
 
 >	mb_promote <- case piece of
->		Ù | to_rank == if pColourToMove==White then 8 else 1 -> map Just [Ý,Ú,Û,Ü]
+>		Ù | to_rank == baseRank (nextColour pColourToMove) -> map Just [Ý,Ú,Û,Ü]
 >		_ -> [ Nothing ] ]
+
+The rating of a position is a float number with a minimum and a maximum rating.
+An equal postion's rating is 0.
+
+> type Rating = Float
+> mAX   = 10000.0
+> mIN   = negate mAX
+> eQUAL =     0.0
+
+> rate :: Position -> (Rating,Maybe MatchResult)
+
+If there is no pawn moved or piece taken for 50 halfmoves,
+the game is drawn:
+
+> rate Position{..} | pHalfmoveClock >= 50 = (eQUAL,Just $ Draw Fifty_Halfmoves)
+
+If there is no legal move for one colour, we have either a stalemate,
+or a checkmate if the king is in check:
+
+> rate pos | [] <- moveGen pos = case (notInCheck pos,pColourToMove pos) of
+> 	(True,_)      -> (eQUAL,Just $ Draw Stalemate)
+> 	(False,White) -> (mIN,  Just $ Winner Black Checkmate)
+> 	(False,Black) -> (mAX,  Just $ Winner White Checkmate)
+
+With only one bishop or knight ("light figure"), neither side can win:
+
+> rate pos@Position{..} | max_one_light_figure = (eQUAL,Just $ Draw NoWinPossible) where
+> 	all_light_figures = all (`elem` [Ú,Û])
+> 	max_one_light_figure = case sort $ filter ((/=Þ).snd) $ catMaybes $ elems pBoard of
+> 		[]                                                          -> True
+> 		[(_,fig)]                   | all_light_figures [fig]       -> True
+> 		[(White,fig1),(Black,fig2)] | all_light_figures [fig1,fig2] -> True
+>		_                                                           -> False
+
+Otherwise, we will rate the position based on material, distance of pawns from promotion,
+and the mobility of each piece.
+
+> rate pos = (rating,Nothing) where
+>	rating = 0.1*mobility + sum [ (if colour==White then id else negate) $
+> 		case piece of
+> 			Ù -> 1 + case abs (rank - baseRank colour) of
+> 				1 -> 4
+> 				2 -> 2
+> 				_ -> 0
+> 			Ú -> 3
+> 			Û -> 3
+> 			Ü -> 5
+> 			Ý -> 9
+> 			Þ -> 0 |
+> 		(coors@(_,rank),Just (colour,piece)) <- assocs $ pBoard pos ]
+> 	mobility :: Rating
+> 	mobility = fromIntegral $
+> 		length (potentialMoves $ pos { pColourToMove = White }) -
+> 		length (potentialMoves $ pos { pColourToMove = Black })
+
+In order to play a match with the computer, we need an interaction loop taking the input
+from the console and showing the current position.
+
+We represent the computing depth as an integer:
+
+> type Depth = Int
+
+main = loop 4 initialPosition stackNew where
+	loop :: Depth -> Position -> Stack Position -> IO ()
+	loop maxdepth pos pos_history = do
+		case rate pos of
+			Right matchresult -> 
