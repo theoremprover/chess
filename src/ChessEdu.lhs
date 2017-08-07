@@ -63,7 +63,7 @@ and a clock counting the half moves that have been made
 > 	pColourToMove       :: Colour,
 > 	pCanCastleQueenSide :: Set Colour,
 > 	pCanCastleKingSide  :: Set Colour,
-> 	pEnPassantSquare    :: Maybe Coors,
+> 	pEnPassant          :: Maybe (Coors,Coors),
 > 	pHalfmoveClock      :: Int,
 >	pNextMoveNumber     :: Int }
 >-- 	deriving Eq
@@ -86,7 +86,7 @@ and the half move clock starts at zero:
 > 	pColourToMove       = White,
 > 	pCanCastleQueenSide = Set.fromList allOfThem,
 > 	pCanCastleKingSide  = Set.fromList allOfThem,
-> 	pEnPassantSquare    = Nothing,
+> 	pEnPassant          = Nothing,
 > 	pHalfmoveClock      = 0,
 >	pNextMoveNumber     = 1 }
 
@@ -100,6 +100,15 @@ Castling and promotion happen on base ranks:
 
 > baseRank White = 1
 > baseRank Black = 8
+
+We play on a cartesian board with four basic directions
+
+> (north,south,east,west) = ((0,1),(0,-1),(1,0),(-1,0))
+
+White's pawns move northwards, Black's pawns southwards.
+
+> pawnDir White = north
+> pawnDir Black = south
 
 In order to print a board, we define a show_square function:
 
@@ -187,8 +196,20 @@ taking a piece. After 50 such "half"moves the match is drawn.
 >		Move _    _ (Just _) _ -> 0
 >		Move from _ _ _ | Just (_,Ù) <- pBoard!from -> 0
 >		_ -> pHalfmoveClock + 1,
-> 	pNextMoveNumber = pNextMoveNumber + 1 }
+
+Increase the move number counter
+
+> 	pNextMoveNumber = pNextMoveNumber + 1,
+
+If a pawn moves a double step, enable possibility of "en passant" for the
+next move by saving the pawn's intermediate and target square.
+
+>	pEnPassant = case move of
+>		Move from to Nothing Nothing |
+>			Just (_,Ù) <- pBoard!from, Just to <- from +++ 2*pawn_dir, Just middle <- from +++ pawn_dir -> Just (middle,to)
+>		_ -> Nothing }
 > 	where
+>	pawn_dir = pawnDir pColourToMove 
 >	(disabled_queenside,disabled_kingside) = case (pColourToMove,move) of
 > 		(_,Castling _)           -> (True, True )
 > 		(White,Move (E,1) _ _ _) -> (True, True )
@@ -243,8 +264,7 @@ Is a square threatened by a piece of a given colour?
 >	(move_from@(_,from_rank),Just (colour,piece)) <- assocs pBoard, colour==pColourToMove,
 >	(move_to@(_,to_rank),mb_takes) <- let
 >		initial_rank = if pColourToMove==White then 2 else 7
->		pawn_dir     = if pColourToMove==White then north else south
-> 		(north,south,east,west) = ((0,1),(0,-1),(1,0),(-1,0))
+>		pawn_dir = pawnDir pColourToMove 
 > 		diagonals = [ north+east,north+west,south+east,south+west ]
 > 		straights = [ north,west,south,east ]
 >	 	knight_moves = [ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
@@ -273,10 +293,14 @@ given that this target square is also empty:
 >						_ -> []
 >				Nothing -> [] ) ++
 
-A pawn can take pieces diagonally in front of it:
+A pawn can take pieces diagonally in front of it,
+even intercepting a two square move of an opponent's pawn ("en passant"):
 
->				[ (move_to,Just move_to) | Just move_to <- map (move_from +++) [pawn_dir+east,pawn_dir+west],
->					pBoard!move_to /= Nothing ]
+>				[ (move_to,Just take_on) | Just move_to <- map (move_from +++) [pawn_dir+east,pawn_dir+west],
+>					take_on <- case (pBoard!move_to,pEnPassant) of
+>						(Just (colour,_), _) | colour /= pColourToMove -> [ move_to ]
+>						(Nothing, Just (middle,pawn_coors)) | middle == move_to -> [ pawn_coors ]
+>						_ -> [] ]
 
 For a knight, there is a fixed set of target squares.
 
@@ -302,7 +326,14 @@ Only a pawn will be promoted to a piece once it reaches the opposite base rank:
 
 >	mb_promote <- case piece of
 >		Ù | to_rank == baseRank (nextColour pColourToMove) -> map Just [Ý,Ú,Û,Ü]
->		_ -> [ Nothing ] ]
+>		_ -> [ Nothing ] ] ++
+
+A player might castle kingside or queenside, if both the king and the rook haven't moved yet
+(the player's colour is stored in pCanCastle<X>Side if he still has the right to castle)
+and the squares between them are empty.
+
+>	[ Castling Kingside  | pColourToMove `elem` pCanCastleKingSide,  all square_empty [(F,r),(G,r)] ] ++
+>	[ Castling Queenside | pColourToMove `elem` pCanCastleQueenSide, all square_empty [(D,r),(C,r),(B,r)] ]
 
 The rating of a position is a float number with a minimum and a maximum rating.
 An equal postion's rating is 0.
@@ -311,6 +342,9 @@ An equal postion's rating is 0.
 > mAX   = 10000.0
 > mIN   = negate mAX
 > eQUAL =     0.0
+
+The rate function will return a rating of the position together
+with an match result if the match ends.
 
 > rate :: Position -> (Rating,Maybe MatchResult)
 
@@ -327,7 +361,7 @@ or a checkmate if the king is in check:
 > 	(False,White) -> (mIN,  Just $ Winner Black Checkmate)
 > 	(False,Black) -> (mAX,  Just $ Winner White Checkmate)
 
-With only one bishop or knight ("light figure"), neither side can win:
+With only one bishop or knight ("light figures"), neither side can win:
 
 > rate pos@Position{..} | max_one_light_figure = (eQUAL,Just $ Draw NoWinPossible) where
 > 	all_light_figures = all (`elem` [Ú,Û])
