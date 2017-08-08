@@ -327,21 +327,25 @@ Only a pawn will be promoted to a piece once it reaches the opposite base rank:
 >	mb_promote <- case piece of
 >		Ù | to_rank == baseRank (nextColour pColourToMove) -> map Just [Ý,Ú,Û,Ü]
 >		_ -> [ Nothing ] ] ++
+>
+>	let
+>		r = baseRank pColourToMove
+>		square_empty coors = isNothing $ pBoard!coors
+>	in
 
 A player might castle kingside or queenside, if both the king and the rook haven't moved yet
-(the player's colour is stored in pCanCastle<X>Side if he still has the right to castle)
-and the squares between them are empty.
+(i.e. the player's colour is stored in pCanCastle<X>Side) and the squares between them are empty.
 
->	[ Castling Kingside  | pColourToMove `elem` pCanCastleKingSide,  all square_empty [(F,r),(G,r)] ] ++
->	[ Castling Queenside | pColourToMove `elem` pCanCastleQueenSide, all square_empty [(D,r),(C,r),(B,r)] ]
+>	[ Castling Kingside  | pColourToMove `Set.member` pCanCastleKingSide,  all square_empty [(F,r),(G,r)] ] ++
+>	[ Castling Queenside | pColourToMove `Set.member` pCanCastleQueenSide, all square_empty [(D,r),(C,r),(B,r)] ]
 
 The rating of a position is a float number with a minimum and a maximum rating.
 An equal postion's rating is 0.
 
 > type Rating = Float
-> mAX   = 10000.0
-> mIN   = negate mAX
-> eQUAL =     0.0
+> mAX         = 10000.0
+> mIN         = negate mAX
+> eQUAL       =     0.0
 
 The rate function will return a rating of the position together
 with an match result if the match ends.
@@ -399,8 +403,25 @@ We represent the computing depth as an integer:
 
 > type Depth = Int
 
-main = loop 4 initialPosition stackNew where
-	loop :: Depth -> Position -> Stack Position -> IO ()
-	loop maxdepth pos pos_history = do
-		case rate pos of
-			Right matchresult -> 
+> main = loop 2 initialPosition stackNew where
+>	loop :: Depth -> Position -> Stack Position -> IO ()
+>	loop maxdepth pos pos_history = do
+>		print pos
+>		case rate pos of
+
+Note that in the rate function call above, the actual rating number won't be computed because of lazy evaluation,
+since there are only wildcards below:
+
+>			(_,Just matchresult) -> print matchresult
+>			_ -> do
+>				print pos
+>				putStr "? "
+>				input <- getLine
+>				case s of
+>					"i" -> main
+>					"b" -> case stackPop pos_history of
+>						Nothing -> putStrLn "There is no previous position."
+>						Just (stack',prev_pos) -> loop maxdepth prev_pos stack'
+>					move_str -> case lookup move_str $ map (\ m -> (show m,m)) $ moveGen pos of
+>						Nothing  -> putStrLn "This is no move."
+>						Just move -> loop maxdepth (doMove move pos) (stackPush pos pos_history)
