@@ -2,7 +2,7 @@
 
 We will use unicode symbols in the code and some standard set of compiler extensions...
 
-> {-# LANGUAGE UnicodeSyntax,RecordWildCards,TypeSynonymInstances,FlexibleInstances,OverlappingInstances,TupleSections #-}
+> {-# LANGUAGE UnicodeSyntax,RecordWildCards,TypeSynonymInstances,FlexibleInstances,OverlappingInstances,TupleSections,StandaloneDeriving #-}
 
 > module Main where
 > 
@@ -14,6 +14,8 @@ We will use unicode symbols in the code and some standard set of compiler extens
 > import Data.List
 > import Data.Stack
 > import Data.NumInstances
+> import System.Random  --TODO: Remove if not needed any more
+> import Data.Ord   --TODO: Remove if not needed any more
 
 In chess, two players
 
@@ -418,18 +420,33 @@ We represent the computing depth as an integer:
 Note that in the rate function call above, the actual rating number won't be computed because it is not needed
 ("lazy evaluation") because is only matched against wildcards below:
 
->			(_,Just matchresult) -> print matchresult >> loop maxdepth pos pos_history
->			_ -> do
->				putStr "? "
->				input <- getLine
->				case input of
->					"i" -> main
->					"q" -> return ()
->					"b" -> case stackPop pos_history of
->						Nothing -> putStrLn "There is no previous position."
->						Just (stack',prev_pos) -> loop maxdepth prev_pos stack'
->					move_str -> case lookup move_str $ map (\ m -> (show m,m)) $ moveGen pos of
->						Nothing  -> do
->							putStrLn "This is no (legal) move or command."
->							loop maxdepth pos pos_history
->						Just move -> loop maxdepth (doMove pos move) (stackPush pos_history pos)
+>			(_,Just matchresult) -> print matchresult
+>			_ -> return ()
+>		putStr "? "
+>		input <- getLine
+>		case input of
+>			"i" -> main
+>			"q" -> return ()
+>			"r" -> randomMatch pos
+>			"b" -> case stackPop pos_history of
+>				Nothing -> putStrLn "There is no previous position."
+>				Just (stack',prev_pos) -> loop maxdepth prev_pos stack'
+>			move_str -> case lookup move_str $ map (\ m -> (show m,m)) $ moveGen pos of
+>				Nothing  -> do
+>					putStrLn "This is no (legal) move or command."
+>					loop maxdepth pos pos_history
+>				Just move -> loop maxdepth (doMove pos move) (stackPush pos_history pos)
+>
+>	randomMatch pos = case rate pos of
+>		(_,Just ending) -> print ending
+>		(rating,Nothing) -> do
+>			putStrLn $ "Rating=" ++ show rating
+>			let moves = (if pColourToMove pos == White then reverse else id) $
+>				sortBy (comparing (fst.fst)) $ map (\ m -> (rate $ doMove pos m,m)) $ moveGen pos
+>			r <- randomIO
+>			let (_,move) = moves!!(mod r $ length moves)
+>			putStrLn $ "Moving " ++ show move
+>			let pos' = doMove pos move
+>			print pos'
+>			randomMatch pos'
+		
