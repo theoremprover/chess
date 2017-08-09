@@ -174,13 +174,12 @@ and might also promote a pawn to another piece.
 >	Castling CastlingSide
 >		
 > instance Show Move where
-> 	show Move{..} = show moveFrom ++ maybe "" (const "x") moveTakes ++
->		show moveTo ++ case movePromote of
-> 			Nothing -> ""
-> 			Just Ú -> "N"
-> 			Just Û -> "B"
-> 			Just Ü -> "R"
-> 			Just Ý -> "Q"
+> 	show Move{..} = show moveFrom ++ show moveTo ++ case movePromote of
+> 		Nothing -> ""
+> 		Just Ú -> "N"
+> 		Just Û -> "B"
+> 		Just Ü -> "R"
+> 		Just Ý -> "Q"
 >	show (Castling Queenside) = "O-O-O"
 >	show (Castling Kingside)  = "O-O"
 
@@ -201,12 +200,12 @@ Increase the move number counter
 
 > 	pNextMoveNumber = pNextMoveNumber + 1,
 
-If a pawn moves a double step, enable possibility of "en passant" for the
+If a pawn advances a double step, enable possibility of taking it "en passant" in the
 next move by saving the pawn's intermediate and target square.
 
 >	pEnPassant = case move of
 >		Move from to Nothing Nothing |
->			Just (_,Ù) <- pBoard!from, Just to <- from +++ 2*pawn_dir, Just middle <- from +++ pawn_dir -> Just (middle,to)
+>			Just (_,Ù) <- pBoard!from, Just to == from +++ 2*pawn_dir, Just middle <- from +++ pawn_dir -> Just (middle,to)
 >		_ -> Nothing }
 > 	where
 >	pawn_dir = pawnDir pColourToMove 
@@ -229,9 +228,9 @@ next move by saving the pawn's intermediate and target square.
 In a chess match, either one colour checkmates or it is a draw for some reason
 (one could also resign, of course...)
 
-> data MatchResult = Winner Colour WinReason | Draw DrawReason --deriving (Eq,Show,Ord)
-> data WinReason  = Resignation | Checkmate
-> data DrawReason = Fifty_Halfmoves | Stalemate | NoWinPossible --deriving (Eq,Show,Ord)
+> data MatchResult = Winner Colour WinReason | Draw DrawReason deriving Show
+> data WinReason  = Resignation | Checkmate deriving Show
+> data DrawReason = Fifty_Halfmoves | Stalemate | NoWinPossible deriving Show
 
 The move generator generates all legal moves in a position by first calculating
 all potential moves and then filtering out the moves that are not allowed
@@ -249,11 +248,11 @@ because the king would be in check.
 
 Is a square threatened by a piece of a given colour?
 
-> coorsNotInCheck pos colour coors = not $ any (==coors) [ moveTo |
+> coorsNotInCheck pos colour coors = all (/=coors) [ moveTo |
 > 	Move{..} <- potentialMoves $ pos {
 > 		-- Say, the next colour would be to move now...
 > 		pColourToMove = nextColour colour,
->		-- ... and place some figure at the coors to also get pawn takes:
+>		-- ... and place some figure at the coors to also get pawn takes as potential moves:
 > 		pBoard = pBoard pos // [ (coors,Just (colour,Ý)) ] } ]
 
 > notInCheck pos@Position{..} = coorsNotInCheck pos pColourToMove $ kingsCoors pos pColourToMove
@@ -291,16 +290,22 @@ given that this target square is also empty:
 >					case move_from +++ 2*pawn_dir of
 >						Just move_to2 | Nothing <- pBoard!move_to2, from_rank==initial_rank -> [ (move_to2,Nothing) ]
 >						_ -> []
->				Nothing -> [] ) ++
+>				_ -> [] ) ++
 
 A pawn can take pieces diagonally in front of it,
 even intercepting a two square move of an opponent's pawn ("en passant"):
 
 >				[ (move_to,Just take_on) | Just move_to <- map (move_from +++) [pawn_dir+east,pawn_dir+west],
->					take_on <- case (pBoard!move_to,pEnPassant) of
->						(Just (colour,_), _) | colour /= pColourToMove -> [ move_to ]
->						(Nothing, Just (middle,pawn_coors)) | middle == move_to -> [ pawn_coors ]
->						_ -> [] ]
+>					take_on <- case pBoard!move_to of
+
+If there is an opponent's piece on target square, one can take it:
+
+>						Just (colour,_) | colour /= pColourToMove                                   -> [ move_to ]
+
+If en passant is enabled with the middle square being the current move's target, one can also take:
+
+>						_               | Just (middle,pawn_coors) <- pEnPassant, middle == move_to -> [ pawn_coors ]
+>						_               | otherwise                                                 -> [] ]
 
 For a knight, there is a fixed set of target squares.
 
@@ -407,21 +412,24 @@ We represent the computing depth as an integer:
 >	loop :: Depth -> Position -> Stack Position -> IO ()
 >	loop maxdepth pos pos_history = do
 >		print pos
+>		putStrLn $ "Possible moves are:" ++ show (moveGen pos)
 >		case rate pos of
 
-Note that in the rate function call above, the actual rating number won't be computed because of lazy evaluation,
-since there are only wildcards below:
+Note that in the rate function call above, the actual rating number won't be computed because it is not needed
+("lazy evaluation") because is only matched against wildcards below:
 
->			(_,Just matchresult) -> print matchresult
+>			(_,Just matchresult) -> print matchresult >> loop maxdepth pos pos_history
 >			_ -> do
->				print pos
 >				putStr "? "
 >				input <- getLine
->				case s of
+>				case input of
 >					"i" -> main
+>					"q" -> return ()
 >					"b" -> case stackPop pos_history of
 >						Nothing -> putStrLn "There is no previous position."
 >						Just (stack',prev_pos) -> loop maxdepth prev_pos stack'
 >					move_str -> case lookup move_str $ map (\ m -> (show m,m)) $ moveGen pos of
->						Nothing  -> putStrLn "This is no move."
->						Just move -> loop maxdepth (doMove move pos) (stackPush pos pos_history)
+>						Nothing  -> do
+>							putStrLn "This is no (legal) move or command."
+>							loop maxdepth pos pos_history
+>						Just move -> loop maxdepth (doMove pos move) (stackPush pos_history pos)
