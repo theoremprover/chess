@@ -103,9 +103,10 @@ Castling and promotion happen on base ranks:
 > baseRank White = 1
 > baseRank Black = 8
 
-We play on a cartesian board with four basic directions
+We play on a cartesian board with two dimensions:
 
-> (north,south,east,west) = ((0,1),(0,-1),(1,0),(-1,0))
+> (north,east) = ((0,1),(1,0))
+> (south,west) = (-north,-east)
 
 White's pawns move northwards, Black's pawns southwards.
 
@@ -386,7 +387,7 @@ Otherwise, we will rate the position based on material, distance of pawns from p
 and the mobility of each piece.
 
 > rate pos = (rating,Nothing) where
->	rating = 0.1*mobility + sum [ (if colour==White then id else negate) $
+>	rating = 0.01*mobility + sum [ (if colour==White then id else negate) $
 > 		case piece of
 > 			Ù -> 1 + case abs (rank - baseRank colour) of
 > 				1 -> 4
@@ -403,6 +404,16 @@ and the mobility of each piece.
 > 		length (potentialMoves $ pos { pColourToMove = White }) -
 > 		length (potentialMoves $ pos { pColourToMove = Black })
 
+The search function calculates the best move up to a certain depth according
+to the minimax algortihm:
+
+> search :: Depth -> Position -> [Move] -> (Rating,[Move])
+> search maxdepth pos line | null (moveGen pos) || maxdepth==0 = (fst $ rate pos,line)
+> search maxdepth pos@Position{..} line = minimax $ map (\ m -> search (maxdepth-1) (doMove pos m) (m:line)) $ moveGen pos
+> 	where
+>	minimax :: [(Rating,[Move])] -> (Rating,[Move])
+> 	minimax = if pColourToMove == White then maximumBy (comparing fst) else minimumBy (comparing fst)
+
 In order to play a match with the computer, we need an interaction loop taking the input
 from the console and showing the current position.
 
@@ -414,6 +425,7 @@ We represent the computing depth as an integer:
 >	loop :: Depth -> Position -> Stack Position -> IO ()
 >	loop maxdepth pos pos_history = do
 >		print pos
+>		putStrLn $ "Rating = " ++ show (fst $ rate pos)
 >		putStrLn $ "Possible moves are:" ++ show (moveGen pos)
 >		case rate pos of
 
@@ -427,6 +439,7 @@ Note that in the rate function call above, the actual rating number won't be com
 >		case input of
 >			"i" -> main
 >			"q" -> return ()
+>			"s" -> execute_move $ last $ snd $ search maxdepth pos []
 >			"r" -> randomMatch pos
 >			"b" -> case stackPop pos_history of
 >				Nothing -> putStrLn "There is no previous position."
@@ -435,8 +448,11 @@ Note that in the rate function call above, the actual rating number won't be com
 >				Nothing  -> do
 >					putStrLn "This is no (legal) move or command."
 >					loop maxdepth pos pos_history
->				Just move -> loop maxdepth (doMove pos move) (stackPush pos_history pos)
+>				Just move -> execute_move move
+>		where
+>		execute_move move = loop maxdepth (doMove pos move) (stackPush pos_history pos)
 >
+> -- TODO: Remove if not needed any more
 >	randomMatch pos = case rate pos of
 >		(_,Just ending) -> print ending
 >		(rating,Nothing) -> do
