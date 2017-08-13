@@ -1,6 +1,6 @@
 %include lhs2TeX.fmt
 
-We will use unicode symbols in the code and some standard set of compiler extensions...
+We will use unicode symbols in the code and some language extensions...
 
 > {-# LANGUAGE UnicodeSyntax,RecordWildCards,TypeSynonymInstances,FlexibleInstances,OverlappingInstances,TupleSections,StandaloneDeriving #-}
 
@@ -16,6 +16,7 @@ We will use unicode symbols in the code and some standard set of compiler extens
 > import Data.NumInstances
 > import System.Random  --TODO: Remove if not needed any more
 > import Data.Ord   --TODO: Remove if not needed any more
+> import Text.Printf
 
 In chess, two players
 
@@ -51,14 +52,14 @@ Hence, the coordinates are the (cartesian) product
 > instance Show Coors where
 >	show (file,rank) = map toLower (show file) ++ show rank
 
-
-A position in a chess game consists of
+A position in chess consists of
 the current board,
 the colour to move,
 the set of players that still have the right to castle queen side or king side,
-whether a pawn could be taken en passant in the next move,
+whether a pawn could be taken en passant (double pawn step before),
 and a clock counting the half moves that have been made
 (chess rules say that the game is drawn if for 50+ half moves, no pawn is moved or piece is taken).
+Moreover, we record the move number.
 
 > data Position = Position {
 > 	pBoard              :: Board,
@@ -103,7 +104,7 @@ Castling and promotion happen on base ranks:
 > baseRank White = 1
 > baseRank Black = 8
 
-We play on a cartesian board with two dimensions:
+We play on a cartesian board in two dimensions with the basis {north,east}:
 
 > (north,east) = ((0,1),(1,0))
 > (south,west) = (-north,-east)
@@ -140,34 +141,34 @@ starting from (A,8) in the upper left corner.
 In order to print a chess position, we make Position an instance of Show:
 
 > instance Show Position where
-> 	show Position{..} =
-> 		"¿ÀÀÀÀÀÀÀÀÁ\n" ++
-> 		unlines (map show_rank [8,7..1]) ++
-> 		"ÄÏÐÑÒÓÔÕÖÆ\n" ++
-> 		show pColourToMove ++ " to move\n"
+> 	show Position{..} = printf "¿ÀÀÀÀÀÀÀÀÁ\n%sÄÏÐÑÒÓÔÕÖÆ\n%s to move\n"
+> 		(unlines $ map show_rank [8,7..1]) (show pColourToMove)
 > 		where
 > 		show_rank rank = [ "ÇÈÉÊËÌÍÎ" !! (fromEnum rank - 1) ] ++
 >			[ show_square (is_darksquare (file,rank)) (pBoard!(file,rank)) | file <- [A .. H] ] ++ "Ã"
 > 			where
 > 			is_darksquare (file,rank) = mod (fromEnum rank + fromEnum file) 2 == 1
 
-In order to calculate target square coordinates, we need to add indices to coordinates.
+In order to calculate target square coordinates, we need to add deltas to coordinates.
 Therefore we define a new infix operator, which is left associative and has precedence 6
-(same as the normal "+" operator).
-The target coordinates may be out of the board's bounds, which is indicated by "Nothing".
+(same as the normal "+" operator). 
 
 > infixl 6 +++
+
+The addition result maybe out of the board's bounds, hence the result type in
+
 > (+++) :: Coors -> (Int,Int) -> Maybe Coors
-> (file,rank) +++ (δfile,δrank) | ifile' `elem` [0..7] && rank' `elem` [1..8] = Just (toEnum ifile',rank')
+> (file,rank) +++ (δfile,δrank) |
+>	ifile' `elem` [0..7] && rank' `elem` [1..8] = Just (toEnum ifile',rank')
 > 	where
 > 	(ifile',rank') = (fromEnum file + δfile, rank + δrank)
 > _  +++ _ = Nothing
 
-A move is from a coordinate to another coordinate, might take an opponent's piece
-(for en passant, from another coordinate that the target),
+A move is from a coordinate to another coordinate,
+might take an opponent's piece
+(for en passant, from another square than the target),
 and might also promote a pawn to another piece.
 
-> data CastlingSide = Queenside | Kingside
 > data Move =
 >	Move {
 > 		moveFrom    :: Coors,
@@ -175,7 +176,8 @@ and might also promote a pawn to another piece.
 > 		moveTakes   :: Maybe Coors,
 > 		movePromote :: Maybe Piece } |
 >	Castling CastlingSide
->		
+> data CastlingSide = Queenside | Kingside
+>
 > instance Show Move where
 > 	show Move{..} = show moveFrom ++ show moveTo ++ case movePromote of
 > 		Nothing -> ""
@@ -189,18 +191,16 @@ and might also promote a pawn to another piece.
 > doMove pos@Position{..} move = pos' {
 > 	pCanCastleQueenSide = if disabled_queenside then Set.delete pColourToMove pCanCastleQueenSide else pCanCastleQueenSide,
 > 	pCanCastleKingSide  = if disabled_kingside  then Set.delete pColourToMove pCanCastleKingSide  else pCanCastleKingSide,
-> 	pColourToMove  = nextColour pColourToMove,
+> 	pColourToMove       = nextColour pColourToMove,
 
-The halfmove clock counts the number of consecutive moves without a pawn move or
+The halfmove clock increases with every consecutive move other than a pawn's and without
 taking a piece. After 50 such "half"moves the match is drawn.
 
 >	pHalfmoveClock = case move of
->		Move _    _ (Just _) _ -> 0
->		Move from _ _ _ | Just (_,Ù) <- pBoard!from -> 0
->		_ -> pHalfmoveClock + 1,
-
-Increase the move number counter
-
+>		Move _    _ (Just _) _                              -> 0
+>		Move from _ _        _ | Just (_,Ù) <- pBoard!from -> 0
+>		_                                                   -> pHalfmoveClock + 1,
+>
 > 	pNextMoveNumber = pNextMoveNumber + 1,
 
 If a pawn advances a double step, enable possibility of taking it "en passant" in the
@@ -208,8 +208,10 @@ next move by saving the pawn's intermediate and target square.
 
 >	pEnPassant = case move of
 >		Move from to Nothing Nothing |
->			Just (_,Ù) <- pBoard!from, Just to == from +++ 2*pawn_dir, Just middle <- from +++ pawn_dir -> Just (middle,to)
->		_ -> Nothing }
+>			Just (_,Ù) <- pBoard!from,
+>			Just to == from +++ 2*pawn_dir,
+>			Just middle <- from +++ pawn_dir -> Just (middle,to)
+>		_                                    -> Nothing }
 > 	where
 >	pawn_dir = pawnDir pColourToMove 
 >	(disabled_queenside,disabled_kingside) = case (pColourToMove,move) of
@@ -389,7 +391,7 @@ and the mobility of each piece.
 > rate pos = (rating,Nothing) where
 >	rating = 0.01*mobility + sum [ (if colour==White then id else negate) $
 > 		case piece of
-> 			Ù -> 1 + case abs (rank - baseRank colour) of
+> 			Ù -> 1 + case abs (rank - baseRank (nextColour colour)) of
 > 				1 -> 4
 > 				2 -> 2
 > 				_ -> 0
@@ -398,7 +400,7 @@ and the mobility of each piece.
 > 			Ü -> 5
 > 			Ý -> 9
 > 			Þ -> 0 |
-> 		(coors@(_,rank),Just (colour,piece)) <- assocs $ pBoard pos ]
+> 		((_,rank),Just (colour,piece)) <- assocs $ pBoard pos ]
 > 	mobility :: Rating
 > 	mobility = fromIntegral $
 > 		length (potentialMoves $ pos { pColourToMove = White }) -
@@ -408,11 +410,12 @@ The search function calculates the best move up to a certain depth according
 to the minimax algortihm:
 
 > search :: Depth -> Position -> [Move] -> (Rating,[Move])
-> search maxdepth pos line | null (moveGen pos) || maxdepth==0 = (fst $ rate pos,line)
-> search maxdepth pos@Position{..} line = minimax $ map (\ m -> search (maxdepth-1) (doMove pos m) (m:line)) $ moveGen pos
+> search maxdepth pos              line | null moves || maxdepth==0 = (fst $ rate pos,line)
+> search maxdepth pos@Position{..} line = minimax (comparing fst) $ map deeper moves
 > 	where
->	minimax :: [(Rating,[Move])] -> (Rating,[Move])
-> 	minimax = if pColourToMove == White then maximumBy (comparing fst) else minimumBy (comparing fst)
+>	moves = moveGen pos
+> 	minimax = if pColourToMove == White then maximumBy else minimumBy
+>	deeper move = search (maxdepth-1) (doMove pos move) (move:line)
 
 In order to play a match with the computer, we need an interaction loop taking the input
 from the console and showing the current position.
@@ -425,7 +428,7 @@ We represent the computing depth as an integer:
 >	loop :: Depth -> Position -> Stack Position -> IO ()
 >	loop maxdepth pos pos_history = do
 >		print pos
->		putStrLn $ "Rating = " ++ show (fst $ rate pos)
+>		putStrLn $ printf "Rating = %.2f" (fst $ rate pos)
 >		putStrLn $ "Possible moves are:" ++ show (moveGen pos)
 >		case rate pos of
 
@@ -433,16 +436,20 @@ Note that in the rate function call above, the actual rating number won't be com
 ("lazy evaluation") because is only matched against wildcards below:
 
 >			(_,Just matchresult) -> print matchresult
->			_ -> return ()
->		putStr "? "
->		input <- getLine
+>			_                    -> return ()
+>		input <- putStr "? " >> getLine
 >		case input of
->			"i" -> main
+>			"i" -> loop maxdepth initialPosition stackNew
 >			"q" -> return ()
 >			"s" -> execute_move $ last $ snd $ search maxdepth pos []
 >			"r" -> randomMatch pos
 >			"b" -> case stackPop pos_history of
->				Nothing -> putStrLn "There is no previous position."
+
+TODO: case alternative exhaustion check in Haskell, otherwise null pointer exception in Java e.g.
+
+>				Nothing -> do
+>					putStrLn "There is no previous position."
+>					loop maxdepth pos pos_history
 >				Just (stack',prev_pos) -> loop maxdepth prev_pos stack'
 >			move_str -> case lookup move_str $ map (\ m -> (show m,m)) $ moveGen pos of
 >				Nothing  -> do
