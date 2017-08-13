@@ -413,8 +413,8 @@ to the minimax algortihm:
 > search maxdepth pos              line | null moves || maxdepth==0 = (fst $ rate pos,line)
 > search maxdepth pos@Position{..} line = minimax (comparing fst) $ map deeper moves
 > 	where
->	moves = moveGen pos
-> 	minimax = if pColourToMove == White then maximumBy else minimumBy
+>	moves       = moveGen pos
+> 	minimax     = if pColourToMove == White then maximumBy else minimumBy
 >	deeper move = search (maxdepth-1) (doMove pos move) (move:line)
 
 In order to play a match with the computer, we need an interaction loop taking the input
