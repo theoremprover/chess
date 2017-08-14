@@ -14,8 +14,7 @@ We will use unicode symbols in the code and some language extensions...
 > import Data.List
 > import Data.Stack
 > import Data.NumInstances
-> import System.Random  --TODO: Remove if not needed any more
-> import Data.Ord   --TODO: Remove if not needed any more
+> import Data.Ord
 > import Text.Printf
 
 In chess, two players
@@ -275,13 +274,13 @@ Is a square threatened by a piece of a given colour?
 >		maybe_move from δ = case from +++ δ of
 >			Nothing -> []
 >			Just move_to -> case pBoard!move_to of
->				Nothing -> [ (move_to,Nothing) ]
+>				Nothing                             -> [ (move_to,Nothing) ]
 >				Just (col,_) | col /= pColourToMove -> [ (move_to,Just move_to) ]
->				_ -> []
+>				_            | otherwise            -> []
 >		maybe_move_direction from δ = case maybe_move from δ of
->			move@[ (_,Just _) ]          -> move
+>			move@[ (_,Just _)   ] -> move
 >			move@[ (to,Nothing) ] -> move ++ maybe_move_direction to δ
->			_ -> []
+>			_ | otherwise         -> []
 >		in case piece of
 >			Ù -> ( case move_from +++ pawn_dir of
 
@@ -295,7 +294,7 @@ given that this target square is also empty:
 >					case move_from +++ 2*pawn_dir of
 >						Just move_to2 | Nothing <- pBoard!move_to2, from_rank==initial_rank -> [ (move_to2,Nothing) ]
 >						_ -> []
->				_ -> [] ) ++
+>				_            | otherwise -> [] ) ++
 
 A pawn can take pieces diagonally in front of it,
 even intercepting a two square move of an opponent's pawn ("en passant"):
@@ -336,7 +335,7 @@ Only a pawn will be promoted to a piece once it reaches the opposite base rank:
 
 >	mb_promote <- case piece of
 >		Ù | to_rank == baseRank (nextColour pColourToMove) -> map Just [Ý,Ú,Û,Ü]
->		_ -> [ Nothing ] ] ++
+>		_ | otherwise                                      -> [ Nothing ] ] ++
 >
 >	let
 >		r = baseRank pColourToMove
@@ -383,7 +382,7 @@ With only one bishop or knight ("light figures"), neither side can win:
 > 		[]                                                          -> True
 > 		[(_,fig)]                   | all_light_figures [fig]       -> True
 > 		[(White,fig1),(Black,fig2)] | all_light_figures [fig1,fig2] -> True
->		_                                                           -> False
+>		_                           | otherwise                     -> False
 
 Otherwise, we will rate the position based on material, distance of pawns from promotion,
 and the mobility of each piece.
@@ -407,22 +406,20 @@ and the mobility of each piece.
 > 		length (potentialMoves $ pos { pColourToMove = Black })
 
 The search function calculates the best move up to a certain depth according
-to the minimax algortihm:
-
-> search :: Depth -> Position -> [Move] -> (Rating,[Move])
-> search maxdepth pos              line | null moves || maxdepth==0 = (fst $ rate pos,line)
-> search maxdepth pos@Position{..} line = minimax (comparing fst) $ map deeper moves
-> 	where
->	moves       = moveGen pos
-> 	minimax     = if pColourToMove == White then maximumBy else minimumBy
->	deeper move = search (maxdepth-1) (doMove pos move) (move:line)
-
-In order to play a match with the computer, we need an interaction loop taking the input
-from the console and showing the current position.
-
-We represent the computing depth as an integer:
+to the minimax algortihm.
+We represent the computing depth as an integer.
 
 > type Depth = Int
+>
+> search :: Depth -> Position -> [Move] -> (Rating,[Move])
+> search maxdepth pos              line | null (moveGen pos) || maxdepth==0 = (fst $ rate pos,line)
+> search maxdepth pos@Position{..} line = minimax (comparing fst) (map deeper $ moveGen pos)
+> 	where
+> 	minimax     = if pColourToMove == White then maximumBy else minimumBy
+> 	deeper move = search (maxdepth-1) (doMove pos move) (move:line)
+
+In order to play a match vs. the computer, we need an interaction loop taking the input
+from the console and showing the current position.
 
 > main = loop 2 initialPosition stackNew where
 >	loop :: Depth -> Position -> Stack Position -> IO ()
@@ -436,13 +433,12 @@ Note that in the rate function call above, the actual rating number won't be com
 ("lazy evaluation") because is only matched against wildcards below:
 
 >			(_,Just matchresult) -> print matchresult
->			_                    -> return ()
+>			_ | otherwise        -> return ()
 >		input <- putStr "? " >> getLine
 >		case input of
 >			"i" -> loop maxdepth initialPosition stackNew
 >			"q" -> return ()
 >			"s" -> execute_move $ last $ snd $ search maxdepth pos []
->			"r" -> randomMatch pos
 >			"b" -> case stackPop pos_history of
 
 TODO: case alternative exhaustion check in Haskell, otherwise null pointer exception in Java e.g.
@@ -452,24 +448,9 @@ TODO: case alternative exhaustion check in Haskell, otherwise null pointer excep
 >					loop maxdepth pos pos_history
 >				Just (stack',prev_pos) -> loop maxdepth prev_pos stack'
 >			move_str -> case lookup move_str $ map (\ m -> (show m,m)) $ moveGen pos of
->				Nothing  -> do
+>				Nothing   -> do
 >					putStrLn "This is no (legal) move or command."
 >					loop maxdepth pos pos_history
 >				Just move -> execute_move move
 >		where
 >		execute_move move = loop maxdepth (doMove pos move) (stackPush pos_history pos)
->
-> -- TODO: Remove if not needed any more
->	randomMatch pos = case rate pos of
->		(_,Just ending) -> print ending
->		(rating,Nothing) -> do
->			putStrLn $ "Rating=" ++ show rating
->			let moves = (if pColourToMove pos == White then reverse else id) $
->				sortBy (comparing (fst.fst)) $ map (\ m -> (rate $ doMove pos m,m)) $ moveGen pos
->			r <- randomIO
->			let (_,move) = moves!!(mod r $ length moves)
->			putStrLn $ "Moving " ++ show move
->			let pos' = doMove pos move
->			print pos'
->			randomMatch pos'
-		
