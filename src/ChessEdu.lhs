@@ -2,7 +2,8 @@
 
 We will use unicode symbols in the code and some language extensions...
 
-> {-# LANGUAGE UnicodeSyntax,RecordWildCards,TypeSynonymInstances,FlexibleInstances,OverlappingInstances,TupleSections,StandaloneDeriving #-}
+> {-# LANGUAGE UnicodeSyntax,RecordWildCards,TypeSynonymInstances,FlexibleInstances,
+>	OverlappingInstances,TupleSections,StandaloneDeriving #-}
 
 > module Main where
 > 
@@ -16,6 +17,8 @@ We will use unicode symbols in the code and some language extensions...
 > import Data.NumInstances
 > import Data.Ord
 > import Text.Printf
+> import Control.Parallel.Strategies
+> import System.IO
 
 In chess, two players
 
@@ -68,7 +71,6 @@ Moreover, we record the move number.
 > 	pEnPassant          :: Maybe (Coors,Coors),
 > 	pHalfmoveClock      :: Int,
 >	pNextMoveNumber     :: Int }
->-- 	deriving Eq
 
 In the initial position, White is to start,
 with both players having all castling rights.
@@ -140,8 +142,8 @@ starting from (A,8) in the upper left corner.
 In order to print a chess position, we make Position an instance of Show:
 
 > instance Show Position where
-> 	show Position{..} = printf "¿ÀÀÀÀÀÀÀÀÁ\n%sÄÏÐÑÒÓÔÕÖÆ\n%s to move\n"
-> 		(unlines $ map show_rank [8,7..1]) (show pColourToMove)
+> 	show Position{..} = printf "¿ÀÀÀÀÀÀÀÀÁ\n%sÄÏÐÑÒÓÔÕÖÆ\n%s to do move %i\n"
+> 		(unlines $ map show_rank [8,7..1]) (show pColourToMove) pNextMoveNumber
 > 		where
 > 		show_rank rank = [ "ÇÈÉÊËÌÍÎ" !! (fromEnum rank - 1) ] ++
 >			[ show_square (is_darksquare (file,rank)) (pBoard!(file,rank)) | file <- [A .. H] ] ++ "Ã"
@@ -388,19 +390,17 @@ Otherwise, we will rate the position based on material, distance of pawns from p
 and the mobility of each piece.
 
 > rate pos = (rating,Nothing) where
->	rating = 0.01*mobility + sum [ (if colour==White then id else negate) $
-> 		case piece of
-> 			Ù -> 1 + case abs (rank - baseRank (nextColour colour)) of
-> 				1 -> 4
-> 				2 -> 2
-> 				_ -> 0
-> 			Ú -> 3
-> 			Û -> 3
-> 			Ü -> 5
-> 			Ý -> 9
-> 			Þ -> 0 |
-> 		((_,rank),Just (colour,piece)) <- assocs $ pBoard pos ]
-> 	mobility :: Rating
+>	rating = 0.01*mobility + sum [ (if colour==White then id else negate) (piece_val piece colour coors) |
+> 		(coors,Just (colour,piece)) <- assocs $ pBoard pos ]
+> 	piece_val Ù colour (_,rank) = 1 + case abs (rank - baseRank (nextColour colour)) of
+> 				1             -> 4
+> 				2             -> 2
+> 				_ | otherwise -> 0
+> 	piece_val Ú _ _ = 3
+> 	piece_val Û _ _ = 3
+> 	piece_val Ü _ _ = 5
+> 	piece_val Ý _ _ = 9
+> 	piece_val Þ _ _ = 0
 > 	mobility = fromIntegral $
 > 		length (potentialMoves $ pos { pColourToMove = White }) -
 > 		length (potentialMoves $ pos { pColourToMove = Black })
@@ -411,15 +411,20 @@ We represent the computing depth as an integer.
 
 > type Depth = Int
 >
-> search :: Depth -> Position -> [Move] -> (Rating,[Move])
-> search maxdepth pos              line | null (moveGen pos) || maxdepth==0 = (fst $ rate pos,line)
-> search maxdepth pos@Position{..} line = minimax (comparing fst) (map deeper $ moveGen pos)
+> search :: Bool -> Depth -> Position -> [Move] -> (Rating,[Move])
+> search _ maxdepth pos                     line | null (moveGen pos) || maxdepth==0 = (fst $ rate pos,line)
+> search parallel maxdepth pos@Position{..} line = minimax (comparing fst) (functor deeper $ moveGen pos)
 > 	where
-> 	minimax     = if pColourToMove == White then maximumBy else minimumBy
-> 	deeper move = search (maxdepth-1) (doMove pos move) (move:line)
 
-In order to play a match vs. the computer, we need an interaction loop taking the input
-from the console and showing the current position.
+Since with pure functional code there can't be any race conditions or deadlocks,
+we can easily distribute the search on multicore by using a parallel map:
+
+>	functor     = if parallel then parMap rpar else map
+> 	minimax     = if pColourToMove == White then maximumBy else minimumBy
+> 	deeper move = search False (maxdepth-1) (doMove pos move) (move:line)
+
+In order to play a match vs. the computer, we need an interaction loop accepting input
+from the console.
 
 > main = loop 2 initialPosition stackNew where
 >	loop :: Depth -> Position -> Stack Position -> IO ()
@@ -434,19 +439,18 @@ Note that in the rate function call above, the actual rating number won't be com
 
 >			(_,Just matchresult) -> print matchresult
 >			_ | otherwise        -> return ()
->		input <- putStr "? " >> getLine
+>		input <- putStr "? " >> hFlush stdout >> getLine
 >		case input of
 >			"i" -> loop maxdepth initialPosition stackNew
 >			"q" -> return ()
->			"s" -> execute_move $ last $ snd $ search maxdepth pos []
+>			"s" -> execute_move $ last $ snd $ search False maxdepth pos []
+>			"p" -> execute_move $ last $ snd $ search True  maxdepth pos []
 >			"b" -> case stackPop pos_history of
-
-TODO: case alternative exhaustion check in Haskell, otherwise null pointer exception in Java e.g.
-
 >				Nothing -> do
 >					putStrLn "There is no previous position."
 >					loop maxdepth pos pos_history
 >				Just (stack',prev_pos) -> loop maxdepth prev_pos stack'
+>			depth_str | [(depth,[])] <- reads depth_str -> loop depth pos pos_history
 >			move_str -> case lookup move_str $ map (\ m -> (show m,m)) $ moveGen pos of
 >				Nothing   -> do
 >					putStrLn "This is no (legal) move or command."
