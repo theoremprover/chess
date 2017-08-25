@@ -19,6 +19,11 @@ We will use unicode symbols in the code and some language extensions...
 > import Text.Printf
 > import Control.Parallel.Strategies
 > import System.IO
+> import System.CPUTime
+> import System.Time
+> import qualified Data.IntMap.Strict as Map
+> -- import Data.Hashable
+> -- import qualified Data.HashMap.Strict as HashMap (insert,HashMap,empty,lookup,size)
 
 In chess, two players
 
@@ -98,7 +103,7 @@ The allOfThem function generates a list of all values of the respective type,
 which is needed above.
 
 > allOfThem :: (Enum a,Bounded a,Ord a) => [a]
-> allOfThem = enumFromTo minBound maxBound
+> allOfThem = [minBound..maxBound]
 
 Castling and promotion happen on base ranks:
 
@@ -151,7 +156,7 @@ In order to print a chess position, we make Position an instance of Show:
 > 			is_darksquare (file,rank) = mod (fromEnum rank + fromEnum file) 2 == 1
 
 In order to calculate target square coordinates, we need to add deltas to coordinates.
-Therefore we define a new infix operator, which is left associative and has precedence 6
+Therefore we define a new infix operator "+++", which is left associative and has precedence 6
 (same as the normal "+" operator). 
 
 > infixl 6 +++
@@ -159,11 +164,10 @@ Therefore we define a new infix operator, which is left associative and has prec
 The addition result maybe out of the board's bounds, hence the result type in
 
 > (+++) :: Coors -> (Int,Int) -> Maybe Coors
-> (file,rank) +++ (δfile,δrank) |
->	ifile' `elem` [0..7] && rank' `elem` [1..8] = Just (toEnum ifile',rank')
-> 	where
+> (file,rank) +++ (δfile,δrank) | ifile' `elem` [0..7] && rank' `elem` [1..8] =
+>	Just (toEnum ifile',rank') where
 > 	(ifile',rank') = (fromEnum file + δfile, rank + δrank)
-> _  +++ _ = Nothing
+> _ +++ _ = Nothing
 
 A move is from a coordinate to another coordinate,
 might take an opponent's piece
@@ -198,11 +202,11 @@ The halfmove clock increases with every consecutive move other than a pawn's and
 taking a piece. After 50 such "half"moves the match is drawn.
 
 >	pHalfmoveClock = case move of
->		Move _    _ (Just _) _                              -> 0
->		Move from _ _        _ | Just (_,Ù) <- pBoard!from -> 0
->		_                                                   -> pHalfmoveClock + 1,
+>		Move { moveTakes = Just _ }                -> 0
+>		Move {..} | Just (_,Ù) <- pBoard!moveFrom -> 0
+>		_ | otherwise                              -> pHalfmoveClock + 1,
 >
-> 	pNextMoveNumber = pNextMoveNumber + 1,
+> 	pNextMoveNumber = if pColourToMove==Black then pNextMoveNumber+1 else pNextMoveNumber,
 
 If a pawn advances a double step, enable possibility of taking it "en passant" in the
 next move by saving the pawn's intermediate and target square.
@@ -412,9 +416,8 @@ We represent the computing depth as an integer.
 > type Depth = Int
 >
 > search :: Bool -> Depth -> Position -> [Move] -> (Rating,[Move])
-> search _ maxdepth pos                     line | null (moveGen pos) || maxdepth==0 = (fst $ rate pos,line)
-> search parallel maxdepth pos@Position{..} line = minimax (comparing fst) (functor deeper $ moveGen pos)
-> 	where
+> search _        maxdepth pos              line | null (moveGen pos) || maxdepth==0 = (fst $ rate pos,line)
+> search parallel maxdepth pos@Position{..} line = minimax (comparing fst) (functor deeper $ moveGen pos) where
 
 Since with pure functional code there can't be any race conditions or deadlocks,
 we can easily distribute the search on multicore by using a parallel map:
@@ -445,6 +448,9 @@ Note that in the rate function call above, the actual rating number won't be com
 >			"q" -> return ()
 >			"s" -> execute_move $ last $ snd $ search False maxdepth pos []
 >			"p" -> execute_move $ last $ snd $ search True  maxdepth pos []
+>			"a" -> do
+>				(
+>				execute_move move$ last $ snd $ alphabeta maxdepth pos
 >			"b" -> case stackPop pos_history of
 >				Nothing -> do
 >					putStrLn "There is no previous position."
@@ -458,3 +464,67 @@ Note that in the rate function call above, the actual rating number won't be com
 >				Just move -> execute_move move
 >		where
 >		execute_move move = loop maxdepth (doMove pos move) (stackPush pos_history pos)
+
+The alpha-beta search keeps two values α and β, representing the minimum result that both sides
+have for sure already in the current position. This leads to cutoffs for paths outside of this window.
+
+> data SearchState = SearchState {
+> 	killerMoves         :: Map.IntMap [(Rating,Move)],
+> 	killerMoveHits      :: Int,
+> 	memoizationHits     :: Int,
+> 	memoizationMisses   :: Int,
+> --	positionHashtable   :: HashMap.HashMap Position (Rating,Line),
+> 	αCutoffs            :: Int,
+> 	βCutoffs            :: Int,
+> 	nodesProcessed      :: Int,
+> 	leavesEvaluated     :: Int,
+> 	searchStartTime     :: Integer,
+> 	lastStateOutputTime :: Integer }
+> 	deriving (Show)
+
+> printSearchStats SearchState{..} = liftIO $ do
+> 	putStrLn $ printf "alpha-/beta cutoffs: %i/%i" αCutoffs βCutoffs
+> 	putStrLn $ printf "Killer move hits: %i" killerMoveHits
+> 	putStrLn $ printf "Killer moves: %s" (show $ Map.assocs killerMoves)
+> --	putStrLn $ printf "Hashed Positions: %i" (HashMap.size positionHashtable)
+> --	putStrLn $ printf "Position Hashtable hits/misses: %i/%i" memoizationHits memoizationMisses
+> 	TOD current_secs _ <- liftIO getClockTime
+> 	let duration = current_secs - searchStartTime
+> 	putStrLn $ printf "Search time: %is, total %i nodes/s" duration (div nodesProcessed (max 1 (fromIntegral duration))) 
+> 	putStrLn $ printf "%i nodes processed, %i leaves evaluated" nodesProcessed leavesEvaluated
+
+> numKillerMoves = 10
+
+> type SearchM a = StateT SearchState IO a
+
+> showLine linestr rating line = do
+> 	liftIO $ putStrLn $ linestr ++ " (" ++ (printf "%.2f" rating) ++ ") : " ++ show line
+
+> alphabeta :: Depth -> Position -> SearchM (Maybe (Rating,Line))
+> alphabeta maxdepth pos = do
+> 	TOD searchstarttime _ <- liftIO getClockTime
+> 	runStateT (alphabetaM pos (0.0,1.0) depth [] (mIN,mAX)) $
+> 		SearchState Map.empty 0 0 0 HashMap.empty 0 0 0 0 searchstarttime 0
+
+> alphabetaM :: Position -> (Float,Float) -> Depth -> Line -> (Rating,Rating) -> SearchM (Maybe (Rating,Line))
+> alphabetaM pos (progressmin,progressmax) rest_depth current_line (α,β) = do
+> 	modify $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
+> 	let (rating,mb_matchresult) = rate pos
+> 	ss <- get
+> 	TOD current_secs _ <- liftIO getClockTime
+> 	when (current_secs - lastStateOutputTime ss >= 1) $ do
+> 		modify $ \ s -> s { lastStateOutputTime = current_secs }
+> 		liftIO $ print pos
+> 		liftIO $ printf "Progress: %.0f%%\n" (progressmin*100.0)
+> 		showLine "Current line" rating current_line
+> 		liftIO $ printf "(alpha,beta) = (%.2f,%.2f)\n" α β
+> 		printSearchStats ss
+> 		liftIO $ putStrLn "-------------------------------------------------------"
+> --		liftIO $ getLine
+> 		return ()
+> 	case rest_depth==0 || isJust mb_matchresult of
+> 		True -> do
+> 			modify $ \ s -> s { leavesEvaluated = leavesEvaluated s + 1 }
+> 			return $ Just (rating,current_line)
+> 		False -> do
+> 			error "Not Implemented yet"
