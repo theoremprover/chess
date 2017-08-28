@@ -24,6 +24,7 @@ We will use unicode symbols in the code and some language extensions...
 > import qualified Data.IntMap.Strict as Map
 > -- import Data.Hashable
 > -- import qualified Data.HashMap.Strict as HashMap (insert,HashMap,empty,lookup,size)
+> import Control.Monad.State.Strict
 
 In chess, two players
 
@@ -181,6 +182,7 @@ and might also promote a pawn to another piece.
 > 		moveTakes   :: Maybe Coors,
 > 		movePromote :: Maybe Piece } |
 >	Castling CastlingSide
+>	deriving Eq
 > data CastlingSide = Queenside | Kingside
 >
 > instance Show Move where
@@ -414,8 +416,9 @@ to the minimax algortihm.
 We represent the computing depth as an integer.
 
 > type Depth = Int
+> type Line = [Move]
 >
-> search :: Bool -> Depth -> Position -> [Move] -> (Rating,[Move])
+> search :: Bool -> Depth -> Position -> Line -> (Rating,Line)
 > search _        maxdepth pos              line | null (moveGen pos) || maxdepth==0 = (fst $ rate pos,line)
 > search parallel maxdepth pos@Position{..} line = minimax (comparing fst) (functor deeper $ moveGen pos) where
 
@@ -449,8 +452,8 @@ Note that in the rate function call above, the actual rating number won't be com
 >			"s" -> execute_move $ last $ snd $ search False maxdepth pos []
 >			"p" -> execute_move $ last $ snd $ search True  maxdepth pos []
 >			"a" -> do
->				(
->				execute_move move$ last $ snd $ alphabeta maxdepth pos
+>				Just (_,move:_) <- alphabeta maxdepth pos
+>				execute_move move
 >			"b" -> case stackPop pos_history of
 >				Nothing -> do
 >					putStrLn "There is no previous position."
@@ -469,7 +472,8 @@ The alpha-beta search keeps two values α and β, representing the minimum resul
 have for sure already in the current position. This leads to cutoffs for paths outside of this window.
 
 > data SearchState = SearchState {
-> 	killerMoves         :: Map.IntMap [(Rating,Move)],
+> -- 	killerMoves         :: Map.IntMap [(Rating,Move)],
+> 	killerMoves         :: [Move],
 > 	killerMoveHits      :: Int,
 > 	memoizationHits     :: Int,
 > 	memoizationMisses   :: Int,
@@ -482,7 +486,11 @@ have for sure already in the current position. This leads to cutoffs for paths o
 > 	lastStateOutputTime :: Integer }
 > 	deriving (Show)
 
-> printSearchStats SearchState{..} = liftIO $ do
+> printSearchStats SearchState{..} pos (α,β) progressmin rating current_line = liftIO $ do
+> 	print pos
+> 	putStrLn $ printf "Progress: %.0f%%\n" (progressmin*100.0)
+> 	showLine "Current line" rating current_line
+> 	putStrLn $ printf "(alpha,beta) = (%.2f,%.2f)\n" α β
 > 	putStrLn $ printf "alpha-/beta cutoffs: %i/%i" αCutoffs βCutoffs
 > 	putStrLn $ printf "Killer move hits: %i" killerMoveHits
 > 	putStrLn $ printf "Killer moves: %s" (show $ Map.assocs killerMoves)
@@ -492,6 +500,8 @@ have for sure already in the current position. This leads to cutoffs for paths o
 > 	let duration = current_secs - searchStartTime
 > 	putStrLn $ printf "Search time: %is, total %i nodes/s" duration (div nodesProcessed (max 1 (fromIntegral duration))) 
 > 	putStrLn $ printf "%i nodes processed, %i leaves evaluated" nodesProcessed leavesEvaluated
+> 	putStrLn "-------------------------------------------------------"
+> --	getLine
 
 > numKillerMoves = 10
 
@@ -500,31 +510,34 @@ have for sure already in the current position. This leads to cutoffs for paths o
 > showLine linestr rating line = do
 > 	liftIO $ putStrLn $ linestr ++ " (" ++ (printf "%.2f" rating) ++ ") : " ++ show line
 
-> alphabeta :: Depth -> Position -> SearchM (Maybe (Rating,Line))
+> alphabeta :: Depth -> Position -> IO (Maybe (Rating,Line))
 > alphabeta maxdepth pos = do
 > 	TOD searchstarttime _ <- liftIO getClockTime
-> 	runStateT (alphabetaM pos (0.0,1.0) depth [] (mIN,mAX)) $
-> 		SearchState Map.empty 0 0 0 HashMap.empty 0 0 0 0 searchstarttime 0
+> 	evalStateT (alphabetaM pos (0.0,1.0) maxdepth [] (mIN,mAX)) $
+> 		SearchState Map.empty 0 0 0 0 0 0 0 searchstarttime 0
 
 > alphabetaM :: Position -> (Float,Float) -> Depth -> Line -> (Rating,Rating) -> SearchM (Maybe (Rating,Line))
-> alphabetaM pos (progressmin,progressmax) rest_depth current_line (α,β) = do
+> alphabetaM pos@Position{..} (progressmin,progressmax) rest_depth current_line (α,β) = do
 > 	modify $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
 > 	let (rating,mb_matchresult) = rate pos
-> 	ss <- get
+> 	ss@SearchState{..} <- get
 > 	TOD current_secs _ <- liftIO getClockTime
 > 	when (current_secs - lastStateOutputTime ss >= 1) $ do
 > 		modify $ \ s -> s { lastStateOutputTime = current_secs }
-> 		liftIO $ print pos
-> 		liftIO $ printf "Progress: %.0f%%\n" (progressmin*100.0)
-> 		showLine "Current line" rating current_line
-> 		liftIO $ printf "(alpha,beta) = (%.2f,%.2f)\n" α β
-> 		printSearchStats ss
-> 		liftIO $ putStrLn "-------------------------------------------------------"
-> --		liftIO $ getLine
+> 		printSearchStats ss pos (α,β) progressmin rating current_line
 > 		return ()
 > 	case rest_depth==0 || isJust mb_matchresult of
 > 		True -> do
 > 			modify $ \ s -> s { leavesEvaluated = leavesEvaluated s + 1 }
 > 			return $ Just (rating,current_line)
 > 		False -> do
-> 			error "Not Implemented yet"
+> 			legal_moves <- moveGen pos
+>			let
+>				lower_val_captures = [ move | move@(Move from _ (Just capture) _) <- legal_moves,
+>					Just (_,capturing_piece) <- pBoard!from, Just (_,captured_piece) <- pBoard!capture,
+>					capturing_piece <= captured_piece ]
+>				recaptures = [ move | move@(Move _ _ (Just capture) _) <- legal_moves,
+>					(Move _ _ (Just previous_capture) _) : _ <- current_line,
+>					capture == previous_capture ]
+>			let moves = nub $ killerMoves `intersect` legal_moves ++ lower_val_captures ++ recaptures ++ legal_moves
+>			
