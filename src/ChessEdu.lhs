@@ -3,10 +3,11 @@
 We will use unicode symbols in the code and some language extensions...
 
 > {-# LANGUAGE UnicodeSyntax,RecordWildCards,TypeSynonymInstances,FlexibleInstances,
->	OverlappingInstances,TupleSections,StandaloneDeriving #-}
+>	OverlappingInstances,TupleSections,StandaloneDeriving,DeriveGeneric #-}
 
 > module Main where
 > 
+> import GHC.Generics (Generic)
 > import Data.Set (Set)
 > import qualified Data.Set as Set
 > import Data.Char
@@ -22,14 +23,15 @@ We will use unicode symbols in the code and some language extensions...
 > import System.CPUTime
 > import System.Time
 > import qualified Data.IntMap.Strict as Map
-> -- import Data.Hashable
-> -- import qualified Data.HashMap.Strict as HashMap (insert,HashMap,empty,lookup,size)
 > import Control.Monad.State.Strict
+> import Data.Hashable
+> import qualified Data.HashMap.Strict as HashMap (insert,HashMap,empty,lookup,size)
 
 In chess, two players
 
 > data Colour = White | Black
-> 	deriving (Show,Eq,Enum,Bounded,Ord)
+> 	deriving (Show,Eq,Enum,Bounded,Ord,Generic)
+> instance Hashable Colour
 
 are taking turns
 
@@ -39,11 +41,15 @@ are taking turns
 in moving pieces
 
 > data Piece = Ù | Ú | Û | Ü | Ý | Þ
-> 	deriving (Eq,Enum,Bounded,Ord,Show)
+> 	deriving (Eq,Enum,Bounded,Ord,Show,Generic)
+> instance Hashable Piece
 
 on a board, which is an array of squares indexed by coordinates:
 
 > type Board = Array Coors Square
+> instance Hashable Board where
+>	hashWithSalt salt board = hashWithSalt salt (assocs board)
+>
 > type Square = Maybe (Colour,Piece)
 
 On a square, maybe there is a piece of a colour, or nothing.
@@ -51,7 +57,8 @@ On a square, maybe there is a piece of a colour, or nothing.
 In chess, the file coordinate is a letter
 
 > data File = A | B | C | D | E | F | G | H
->	deriving (Show,Eq,Ix,Ord,Enum)
+>	deriving (Show,Eq,Ix,Ord,Enum,Generic)
+> instance Hashable File
 
 and the rank is an integer number.
 Hence, the coordinates are the (cartesian) product
@@ -77,6 +84,10 @@ Moreover, we record the move number.
 > 	pEnPassant          :: Maybe (Coors,Coors),
 > 	pHalfmoveClock      :: Int,
 >	pNextMoveNumber     :: Int }
+> 	deriving (Eq,Generic)
+> instance Hashable (Set Colour) where
+> 	hashWithSalt salt set = hashWithSalt salt (Set.toList set)
+> instance Hashable Position
 
 In the initial position, White is to start,
 with both players having all castling rights.
@@ -183,7 +194,7 @@ and might also promote a pawn to another piece.
 > 		movePromote :: Maybe Piece } |
 >	Castling CastlingSide
 >	deriving Eq
-> data CastlingSide = Queenside | Kingside
+> data CastlingSide = Queenside | Kingside deriving Eq
 >
 > instance Show Move where
 > 	show Move{..} = show moveFrom ++ show moveTo ++ case movePromote of
@@ -452,8 +463,8 @@ Note that in the rate function call above, the actual rating number won't be com
 >			"s" -> execute_move $ last $ snd $ search False maxdepth pos []
 >			"p" -> execute_move $ last $ snd $ search True  maxdepth pos []
 >			"a" -> do
->				Just (_,move:_) <- alphabeta maxdepth pos
->				execute_move move
+>				(_,moves) <- alphabeta maxdepth pos
+>				when (not $ null moves) $ execute_move (last moves)
 >			"b" -> case stackPop pos_history of
 >				Nothing -> do
 >					putStrLn "There is no previous position."
@@ -477,7 +488,7 @@ have for sure already in the current position. This leads to cutoffs for paths o
 > 	killerMoveHits      :: Int,
 > 	memoizationHits     :: Int,
 > 	memoizationMisses   :: Int,
-> --	positionHashtable   :: HashMap.HashMap Position (Rating,Line),
+> 	positionHashtable   :: HashMap.HashMap Position (Rating,Line),
 > 	αCutoffs            :: Int,
 > 	βCutoffs            :: Int,
 > 	nodesProcessed      :: Int,
@@ -487,15 +498,14 @@ have for sure already in the current position. This leads to cutoffs for paths o
 > 	deriving (Show)
 
 > printSearchStats SearchState{..} pos (α,β) progressmin rating current_line = liftIO $ do
-> 	print pos
 > 	putStrLn $ printf "Progress: %.0f%%\n" (progressmin*100.0)
 > 	showLine "Current line" rating current_line
 > 	putStrLn $ printf "(alpha,beta) = (%.2f,%.2f)\n" α β
 > 	putStrLn $ printf "alpha-/beta cutoffs: %i/%i" αCutoffs βCutoffs
 > 	putStrLn $ printf "Killer move hits: %i" killerMoveHits
-> 	putStrLn $ printf "Killer moves: %s" (show $ Map.assocs killerMoves)
-> --	putStrLn $ printf "Hashed Positions: %i" (HashMap.size positionHashtable)
-> --	putStrLn $ printf "Position Hashtable hits/misses: %i/%i" memoizationHits memoizationMisses
+> 	putStrLn $ printf "Killer moves: %s" (show killerMoves)
+> 	putStrLn $ printf "Hashed Positions: %i" (HashMap.size positionHashtable)
+> 	putStrLn $ printf "Position Hashtable hits/misses: %i/%i" memoizationHits memoizationMisses
 > 	TOD current_secs _ <- liftIO getClockTime
 > 	let duration = current_secs - searchStartTime
 > 	putStrLn $ printf "Search time: %is, total %i nodes/s" duration (div nodesProcessed (max 1 (fromIntegral duration))) 
@@ -510,34 +520,64 @@ have for sure already in the current position. This leads to cutoffs for paths o
 > showLine linestr rating line = do
 > 	liftIO $ putStrLn $ linestr ++ " (" ++ (printf "%.2f" rating) ++ ") : " ++ show line
 
-> alphabeta :: Depth -> Position -> IO (Maybe (Rating,Line))
+> alphabeta :: Depth -> Position -> IO (Rating,Line)
 > alphabeta maxdepth pos = do
 > 	TOD searchstarttime _ <- liftIO getClockTime
 > 	evalStateT (alphabetaM pos (0.0,1.0) maxdepth [] (mIN,mAX)) $
-> 		SearchState Map.empty 0 0 0 0 0 0 0 searchstarttime 0
+> 		SearchState [] 0 0 0 HashMap.empty 0 0 0 0 searchstarttime 0
 
-> alphabetaM :: Position -> (Float,Float) -> Depth -> Line -> (Rating,Rating) -> SearchM (Maybe (Rating,Line))
+> alphabetaM :: Position -> (Float,Float) -> Depth -> Line -> (Rating,Rating) -> SearchM (Rating,Line)
 > alphabetaM pos@Position{..} (progressmin,progressmax) rest_depth current_line (α,β) = do
 > 	modify $ \ s -> s { nodesProcessed = nodesProcessed s + 1 }
 > 	let (rating,mb_matchresult) = rate pos
-> 	ss@SearchState{..} <- get
+> 	ss <- get
 > 	TOD current_secs _ <- liftIO getClockTime
 > 	when (current_secs - lastStateOutputTime ss >= 1) $ do
 > 		modify $ \ s -> s { lastStateOutputTime = current_secs }
 > 		printSearchStats ss pos (α,β) progressmin rating current_line
-> 		return ()
 > 	case rest_depth==0 || isJust mb_matchresult of
 > 		True -> do
-> 			modify $ \ s -> s { leavesEvaluated = leavesEvaluated s + 1 }
-> 			return $ Just (rating,current_line)
+> 			modify $ \ s -> s { leavesEvaluated = leavesEvaluated ss + 1 }
+> 			return (rating,current_line)
 > 		False -> do
-> 			legal_moves <- moveGen pos
->			let
->				lower_val_captures = [ move | move@(Move from _ (Just capture) _) <- legal_moves,
->					Just (_,capturing_piece) <- pBoard!from, Just (_,captured_piece) <- pBoard!capture,
->					capturing_piece <= captured_piece ]
->				recaptures = [ move | move@(Move _ _ (Just capture) _) <- legal_moves,
->					(Move _ _ (Just previous_capture) _) : _ <- current_line,
->					capture == previous_capture ]
->			let moves = nub $ killerMoves `intersect` legal_moves ++ lower_val_captures ++ recaptures ++ legal_moves
->			
+> 			case HashMap.lookup pos (positionHashtable ss) of
+> 				Just (sub_rating,sub_line) -> do
+> 					modify $ \ s -> s { memoizationHits = memoizationHits s + 1 }
+> 					return (sub_rating,sub_line++current_line)
+> 				Nothing -> do
+> 					modify $ \ s -> s { memoizationMisses = memoizationMisses s + 1 }
+>					let
+>						lower_val_captures = [ move | move@(Move from _ (Just capture) _) <- legal_moves,
+>							Just (_,capturing_piece) <- [pBoard!from], Just (_,captured_piece) <- [pBoard!capture],
+>							capturing_piece <= captured_piece ]
+>						recaptures = [ move | move@(Move _ _ (Just capture) _) <- legal_moves,
+>							Move _ _ (Just previous_capture) _ <- take 1 current_line,
+>							capture == previous_capture ]
+>					let moves = nub $ (killerMoves ss) `intersect` legal_moves ++ lower_val_captures ++ recaptures ++ legal_moves
+>					result <- try_moves moves (if maximizer then mIN else mAX,[])
+> 					modify $ \ s -> s { positionHashtable = HashMap.insert pos result (positionHashtable s) }
+>					return result
+>
+>					where
+>
+> 					legal_moves = moveGen pos
+>					maximizer = pColourToMove==White
+>					isBetterThan = if maximizer then (>) else (<)
+>					try_moves [] result = return result
+>					try_moves (move:moves) (best_subrating,best_subline) = do
+>						let
+>							progressmin' = progressmin + (fromIntegral $ length legal_moves - length (move:moves))*(progressmax-progressmin) / (fromIntegral $ length legal_moves)
+>							progressmax' = progressmin + (progressmax-progressmin) / (fromIntegral $ length legal_moves)
+>						(subrating,subline) <- alphabetaM (doMove pos move) (progressmin',progressmax') (rest_depth-1) (move:current_line) $
+>							if maximizer then (best_subrating,β) else (α,best_subrating)
+>						case subrating `isBetterThan` best_subrating of
+>							False -> try_moves moves (best_subrating,best_subline)
+>							True  -> case if maximizer then subrating >= β else subrating <= α of
+>								True -> do -- CUTOFF
+>									modify $ \ s@SearchState{..} -> s {
+>										killerMoveHits = if move `elem` killerMoves then killerMoveHits + 1 else killerMoveHits,
+>										killerMoves    = take numKillerMoves $ nub $ move : killerMoves,
+>										βCutoffs       = if maximizer then βCutoffs + 1 else βCutoffs,
+>										αCutoffs       = if maximizer then αCutoffs else αCutoffs + 1 }
+>									return (subrating,subline)
+>								False -> try_moves moves (subrating,subline)
