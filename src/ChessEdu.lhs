@@ -463,7 +463,10 @@ Note that in the rate function call above, the actual rating number won't be com
 >			"s" -> execute_move $ last $ snd $ search False maxdepth pos []
 >			"p" -> execute_move $ last $ snd $ search True  maxdepth pos []
 >			"a" -> do
->				(_,moves) <- alphabeta maxdepth pos
+>				(_,moves) <- alphabeta maxdepth pos (mIN,mAX) []
+>				when (not $ null moves) $ execute_move (last moves)
+>			"d" -> do
+>				(_,moves) <- iter_deep maxdepth pos
 >				when (not $ null moves) $ execute_move (last moves)
 >			"b" -> case stackPop pos_history of
 >				Nothing -> do
@@ -489,6 +492,7 @@ have for sure already in the current position. This leads to cutoffs for paths o
 > 	memoizationHits     :: Int,
 > 	memoizationMisses   :: Int,
 > 	positionHashtable   :: HashMap.HashMap Position (Rating,Line),
+>	principalVariation  :: Line,
 > 	αCutoffs            :: Int,
 > 	βCutoffs            :: Int,
 > 	nodesProcessed      :: Int,
@@ -502,6 +506,7 @@ have for sure already in the current position. This leads to cutoffs for paths o
 > 	showLine "Current line" rating current_line
 > 	putStrLn $ printf "(alpha,beta) = (%.2f,%.2f)\n" α β
 > 	putStrLn $ printf "alpha-/beta cutoffs: %i/%i" αCutoffs βCutoffs
+>	putStrLn $ printf "Principal Variation: %s"  (show principalVariation)
 > 	putStrLn $ printf "Killer move hits: %i" killerMoveHits
 > 	putStrLn $ printf "Killer moves: %s" (show killerMoves)
 > 	putStrLn $ printf "Hashed Positions: %i" (HashMap.size positionHashtable)
@@ -520,11 +525,11 @@ have for sure already in the current position. This leads to cutoffs for paths o
 > showLine linestr rating line = do
 > 	liftIO $ putStrLn $ linestr ++ " (" ++ (printf "%.2f" rating) ++ ") : " ++ show line
 
-> alphabeta :: Depth -> Position -> IO (Rating,Line)
-> alphabeta maxdepth pos = do
+> alphabeta :: Depth -> Position -> (Rating,Rating) -> IO (Rating,Line)
+> alphabeta maxdepth pos (α,β) principal_var = do
 > 	TOD searchstarttime _ <- liftIO getClockTime
-> 	evalStateT (alphabetaM pos (0.0,1.0) maxdepth [] (mIN,mAX)) $
-> 		SearchState [] 0 0 0 HashMap.empty 0 0 0 0 searchstarttime 0
+> 	evalStateT (alphabetaM pos (0.0,1.0) maxdepth [] (α,β)) $
+> 		SearchState [] 0 0 0 HashMap.empty principal_var 0 0 0 0 searchstarttime 0
 
 > alphabetaM :: Position -> (Float,Float) -> Depth -> Line -> (Rating,Rating) -> SearchM (Rating,Line)
 > alphabetaM pos@Position{..} (progressmin,progressmax) rest_depth current_line (α,β) = do
@@ -553,7 +558,9 @@ have for sure already in the current position. This leads to cutoffs for paths o
 >						recaptures = [ move | move@(Move _ _ (Just capture) _) <- legal_moves,
 >							Move _ _ (Just previous_capture) _ <- take 1 current_line,
 >							capture == previous_capture ]
->					let moves = nub $ (killerMoves ss) `intersect` legal_moves ++ lower_val_captures ++ recaptures ++ legal_moves
+>					let
+>						principal_moves = take 1 $ drop (rest_depth-1) principalVariation
+>						moves = nub $ (principal_moves ++ killerMoves ss) `intersect` legal_moves ++ lower_val_captures ++ recaptures ++ legal_moves
 >					result <- try_moves moves (if maximizer then mIN else mAX,[])
 > 					modify $ \ s -> s { positionHashtable = HashMap.insert pos result (positionHashtable s) }
 >					return result
@@ -581,3 +588,16 @@ have for sure already in the current position. This leads to cutoffs for paths o
 >										αCutoffs       = if maximizer then αCutoffs else αCutoffs + 1 }
 >									return (subrating,subline)
 >								False -> try_moves moves (subrating,subline)
+
+> iter_deep maxdepth pos = do
+>	iter_deep_loop maxdepth 2 (mIN,mAX) []
+>	where
+>	iter_deep_loop maxdepth cur_depth (α,β) principal_var = do
+>		putStrLn "######################################################"
+>		putStrLn $ printf "Current/max depth: %i/%i" cur_depth maxdepth
+>		(rating,line) <- alphabeta cur_depth pos (α,β) principal_var
+>		case line of
+>			[] -> do -- FAIL, widen window
+>				let (α',β') = (α-(β-α)/2,β+(β-α)/2)
+>				putStrLn $ printf "FAILED with (%.2f,%.2f), widening to (%.2f,%.2f)" α β α' β'
+>				iter_deep_loop maxdepth cur_depth (α',β') principal_var
