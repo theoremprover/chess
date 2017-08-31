@@ -567,7 +567,7 @@ have for sure already in the current position. This leads to cutoffs for paths o
 >					try_moves (move:moves) (best_subrating,best_subline) = do
 >						let
 >							progressmin' = progressmin + (fromIntegral $ length legal_moves - length (move:moves))*(progressmax-progressmin) / (fromIntegral $ length legal_moves)
->							progressmax' = progressmin + (progressmax-progressmin) / (fromIntegral $ length legal_moves)
+>							progressmax' = progressmin' + (progressmax-progressmin) / (fromIntegral $ length legal_moves)
 >						(subrating,subline) <- alphabetaM (doMove pos move) (progressmin',progressmax') (rest_depth-1) (move:current_line) $
 >							if maximizer then (best_subrating,β) else (α,best_subrating)
 >						case subrating `isBetterThan` best_subrating of
