@@ -443,7 +443,7 @@ we can easily distribute the search on multicore by using a parallel map:
 In order to play a match vs. the computer, we need an interaction loop accepting input
 from the console.
 
-> main = loop 2 initialPosition stackNew where
+> main = loop 6 initialPosition stackNew where
 >	loop :: Depth -> Position -> Stack Position -> IO ()
 >	loop maxdepth pos pos_history = do
 >		print pos
@@ -525,7 +525,7 @@ have for sure already in the current position. This leads to cutoffs for paths o
 > showLine linestr rating line = do
 > 	liftIO $ putStrLn $ linestr ++ " (" ++ (printf "%.2f" rating) ++ ") : " ++ show line
 
-> alphabeta :: Depth -> Position -> (Rating,Rating) -> IO (Rating,Line)
+> alphabeta :: Depth -> Position -> (Rating,Rating) -> Line -> IO (Rating,Line)
 > alphabeta maxdepth pos (α,β) principal_var = do
 > 	TOD searchstarttime _ <- liftIO getClockTime
 > 	evalStateT (alphabetaM pos (0.0,1.0) maxdepth [] (α,β)) $
@@ -559,9 +559,9 @@ have for sure already in the current position. This leads to cutoffs for paths o
 >							Move _ _ (Just previous_capture) _ <- take 1 current_line,
 >							capture == previous_capture ]
 >					let
->						principal_moves = take 1 $ drop (rest_depth-1) principalVariation
+>						principal_moves = take 1 $ drop (rest_depth-1) (principalVariation ss)
 >						moves = nub $ (principal_moves ++ killerMoves ss) `intersect` legal_moves ++ lower_val_captures ++ recaptures ++ legal_moves
->					result <- try_moves moves (if maximizer then mIN else mAX,[])
+>					result <- try_moves moves (if maximizer then α else β,[])
 > 					modify $ \ s -> s { positionHashtable = HashMap.insert pos result (positionHashtable s) }
 >					return result
 >
@@ -595,9 +595,16 @@ have for sure already in the current position. This leads to cutoffs for paths o
 >	iter_deep_loop maxdepth cur_depth (α,β) principal_var = do
 >		putStrLn "######################################################"
 >		putStrLn $ printf "Current/max depth: %i/%i" cur_depth maxdepth
+>		putStrLn $ printf "Principal Variation: %s" (show $ reverse principal_var)
+> --		getLine
 >		(rating,line) <- alphabeta cur_depth pos (α,β) principal_var
 >		case line of
->			[] -> do -- FAIL, widen window
->				let (α',β') = (α-(β-α)/2,β+(β-α)/2)
+>			[] -> do -- No line found => widen window
+>				let (α',β') = if rating <= α then (α-(β-α)/2,β) else (α,β+(β-α)/2)
 >				putStrLn $ printf "FAILED with (%.2f,%.2f), widening to (%.2f,%.2f)" α β α' β'
 >				iter_deep_loop maxdepth cur_depth (α',β') principal_var
+>			_  -> do
+>				putStrLn $ printf "found line (%.2f): %s" rating (show $ reverse line)
+>				case cur_depth < maxdepth of
+>					True  -> iter_deep_loop maxdepth (cur_depth+2) (rating-0.3,rating+0.3) line
+>					False -> return (rating,line)
