@@ -1,4 +1,7 @@
+\documentclass{article}
 %include lhs2TeX.fmt
+
+\begin{document}
 
 We will use unicode symbols in the code and some language extensions...
 
@@ -8,7 +11,6 @@ We will use unicode symbols in the code and some language extensions...
 > module Main where
 > 
 > import GHC.Generics (Generic)
-> import Data.Set (Set)
 > import qualified Data.Set as Set
 > import Data.Char
 > import Data.Array
@@ -49,10 +51,10 @@ on a board, which is an array of squares indexed by coordinates:
 > type Board = Array Coors Square
 > instance Hashable Board where
 >	hashWithSalt salt board = hashWithSalt salt (assocs board)
->
-> type Square = Maybe (Colour,Piece)
 
-On a square, maybe there is a piece of a colour, or nothing.
+On a square, maybe there is a piece of a colour (or nothing).
+
+> type Square = Maybe (Colour,Piece)
 
 In chess, the file coordinate is a letter
 
@@ -68,25 +70,23 @@ Hence, the coordinates are the (cartesian) product
 >	show (file,rank) = map toLower (show file) ++ show rank
 
 A position in chess consists of
-the current board,
-the colour to move,
-the set of players that still have the right to castle queen side or king side,
-whether a pawn could be taken en passant (double pawn step before),
-and a clock counting the half moves that have been made
-(chess rules say that the game is drawn if for 50+ half moves, no pawn is moved or piece is taken).
-Moreover, we record the move number.
+- the current board,
+- the colour to move,
+- the lists of players that still have the right to castle queen side or king side,
+- whether a pawn could be taken en passant (double pawn step before),
+- and a clock counting the half moves that have been made
+  (chess rules say that the game is drawn if for 50+ half moves, no pawn is moved or piece is taken).
+- Last but not least, we keep track of the next move's number.
 
 > data Position = Position {
 > 	pBoard              :: Board,
 > 	pColourToMove       :: Colour,
-> 	pCanCastleQueenSide :: Set Colour,
-> 	pCanCastleKingSide  :: Set Colour,
+> 	pCanCastleQueenSide :: [Colour],
+> 	pCanCastleKingSide  :: [Colour],
 > 	pEnPassant          :: Maybe (Coors,Coors),
 > 	pHalfmoveClock      :: Int,
 >	pNextMoveNumber     :: Int }
 > 	deriving (Eq,Generic)
-> instance Hashable (Set Colour) where
-> 	hashWithSalt salt set = hashWithSalt salt (Set.toList set)
 > instance Hashable Position
 
 In the initial position, White is to start,
@@ -105,8 +105,8 @@ and the half move clock starts at zero:
 > 		"ÙèÙèÙèÙè" ++
 > 		"ëÚêÝíÛéÜ",
 > 	pColourToMove       = White,
-> 	pCanCastleQueenSide = Set.fromList allOfThem,
-> 	pCanCastleKingSide  = Set.fromList allOfThem,
+> 	pCanCastleQueenSide = allOfThem,
+> 	pCanCastleKingSide  = allOfThem,
 > 	pEnPassant          = Nothing,
 > 	pHalfmoveClock      = 0,
 >	pNextMoveNumber     = 1 }
@@ -142,19 +142,16 @@ In order to print a board, we define a show_square function:
 > 	Just (Black,piece) | darksquare -> "îïðñòó" !! (fromEnum piece)
 > 	Just (Black,piece)              -> "ßàáâãä" !! (fromEnum piece)
 
-read_square is the inverse of show_square, so we don't have to give both directions
-and thus have single source.
+read_square is (almost) the inverse of show_square, we don't have to give both directions
+and have single source at the same time...
 
-> read_square :: Char -> Square
 > read_square c = lookup c [ (show_square dark (Just (col,piece)), (col,piece)) |
 >	col <- allOfThem, piece <- allOfThem, dark <- allOfThem ]
 
-> boardFromString s = array ((A,1),(H,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [A .. H] ] (map read_square s)
-
 The boardFromString convenience function converts a string to
-a board with pieces on it.
-The resulting board is an array with an index ranging from (A,1) to (H,8),
-starting from (A,8) in the upper left corner.
+a board with pieces on it, starting starting from (A,8) in the upper left corner. 
+
+> boardFromString s = array ((A,1),(H,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [A .. H] ] (map read_square s)
 
 In order to print a chess position, we make Position an instance of Show:
 
@@ -207,8 +204,8 @@ and might also promote a pawn to another piece.
 >	show (Castling Kingside)  = "O-O"
 
 > doMove pos@Position{..} move = pos' {
-> 	pCanCastleQueenSide = if disabled_queenside then Set.delete pColourToMove pCanCastleQueenSide else pCanCastleQueenSide,
-> 	pCanCastleKingSide  = if disabled_kingside  then Set.delete pColourToMove pCanCastleKingSide  else pCanCastleKingSide,
+> 	pCanCastleQueenSide = if disabled_queenside then pColourToMove `delete` pCanCastleQueenSide else pCanCastleQueenSide,
+> 	pCanCastleKingSide  = if disabled_kingside  then pColourToMove `delete` pCanCastleKingSide  else pCanCastleKingSide,
 > 	pColourToMove       = nextColour pColourToMove,
 
 The halfmove clock increases with every consecutive move other than a pawn's and without
@@ -229,18 +226,18 @@ next move by saving the pawn's intermediate and target square.
 >			Just (_,Ù) <- pBoard!from,
 >			Just to == from +++ 2*pawn_dir,
 >			Just middle <- from +++ pawn_dir -> Just (middle,to)
->		_                                    -> Nothing }
+>		_ | otherwise                        -> Nothing }
 > 	where
 >	pawn_dir = pawnDir pColourToMove 
 >	(disabled_queenside,disabled_kingside) = case (pColourToMove,move) of
-> 		(_,Castling _)           -> (True, True )
+> 		(_,    Castling _      ) -> (True, True )
 > 		(White,Move (E,1) _ _ _) -> (True, True )
 > 		(Black,Move (E,8) _ _ _) -> (True, True )
 > 		(White,Move (A,1) _ _ _) -> (True, False)
 > 		(Black,Move (A,8) _ _ _) -> (True ,False)
 > 		(White,Move (H,1) _ _ _) -> (False,True )
 > 		(Black,Move (H,8) _ _ _) -> (False,True )
->		_					     -> (False,False)
+>		_ | otherwise            -> (False,False)
 > 	pos' = pos { pBoard = pBoard // case move of
 > 		Move{..} -> maybe [] (\ take_coors -> [(take_coors,Nothing)]) moveTakes ++
 >			[ (moveFrom,Nothing), (moveTo,maybe (pBoard!moveFrom) (Just.(pColourToMove,)) movePromote) ]
@@ -248,7 +245,7 @@ next move by saving the pawn's intermediate and target square.
 > 		Castling Kingside  -> [ ((H,r),Nothing), ((F,r),pBoard!(H,r)), ((E,r),Nothing), ((G,r),pBoard!(E,r)) ] } where
 >		r = baseRank pColourToMove
 
-In a chess match, either one colour checkmates or it is a draw for some reason
+In a chess match, either one colour checkmates the other or it is a draw for some reason
 (one could also resign, of course...)
 
 > data MatchResult = Winner Colour WinReason | Draw DrawReason deriving Show
@@ -364,8 +361,8 @@ Only a pawn will be promoted to a piece once it reaches the opposite base rank:
 A player might castle kingside or queenside, if both the king and the rook haven't moved yet
 (i.e. the player's colour is stored in pCanCastle<X>Side) and the squares between them are empty.
 
->	[ Castling Kingside  | pColourToMove `Set.member` pCanCastleKingSide,  all square_empty [(F,r),(G,r)] ] ++
->	[ Castling Queenside | pColourToMove `Set.member` pCanCastleQueenSide, all square_empty [(D,r),(C,r),(B,r)] ]
+>	[ Castling Kingside  | pColourToMove `elem` pCanCastleKingSide,  all square_empty [(F,r),(G,r)] ] ++
+>	[ Castling Queenside | pColourToMove `elem` pCanCastleQueenSide, all square_empty [(D,r),(C,r),(B,r)] ]
 
 The rating of a position is a float number with a minimum and a maximum rating.
 An equal postion's rating is 0.
@@ -380,7 +377,7 @@ with an match result if the match ends.
 
 > rate :: Position -> (Rating,Maybe MatchResult)
 
-If there is no pawn moved or piece taken for 50 halfmoves,
+If there is no pawn moved or piece taken for 50 half-moves,
 the game is drawn:
 
 > rate Position{..} | pHalfmoveClock >= 50 = (eQUAL,Just $ Draw Fifty_Halfmoves)
@@ -388,20 +385,20 @@ the game is drawn:
 If there is no legal move for one colour, we have either a stalemate,
 or a checkmate if the king is in check:
 
-> rate pos | [] <- moveGen pos = case (notInCheck pos,pColourToMove pos) of
+> rate pos | moveGen pos == [] = case (notInCheck pos,pColourToMove pos) of
 > 	(True,_)      -> (eQUAL,Just $ Draw Stalemate)
 > 	(False,White) -> (mIN,  Just $ Winner Black Checkmate)
 > 	(False,Black) -> (mAX,  Just $ Winner White Checkmate)
 
-With only one bishop or knight ("light figures"), neither side can win:
+With only one bishop or knight (so called "light figures"), neither side can checkmate:
 
 > rate pos@Position{..} | max_one_light_figure = (eQUAL,Just $ Draw NoWinPossible) where
-> 	all_light_figures = all (`elem` [Ú,Û])
 > 	max_one_light_figure = case sort $ filter ((/=Þ).snd) $ catMaybes $ elems pBoard of
 > 		[]                                                          -> True
 > 		[(_,fig)]                   | all_light_figures [fig]       -> True
 > 		[(White,fig1),(Black,fig2)] | all_light_figures [fig1,fig2] -> True
 >		_                           | otherwise                     -> False
+> 	all_light_figures = all (`elem` [Ú,Û])
 
 Otherwise, we will rate the position based on material, distance of pawns from promotion,
 and the mobility of each piece.
@@ -430,15 +427,15 @@ We represent the computing depth as an integer.
 > type Line = [Move]
 >
 > search :: Bool -> Depth -> Position -> Line -> (Rating,Line)
-> search _        maxdepth pos              line | null (moveGen pos) || maxdepth==0 = (fst $ rate pos,line)
-> search parallel maxdepth pos@Position{..} line = minimax (comparing fst) (functor deeper $ moveGen pos) where
+> search _        depth pos              line | moveGen pos == [] || depth==0 = (fst $ rate pos,line)
+> search parallel depth pos@Position{..} line = minimax (comparing fst) (functor deeper $ moveGen pos) where
 
 Since with pure functional code there can't be any race conditions or deadlocks,
 we can easily distribute the search on multicore by using a parallel map:
 
 >	functor     = if parallel then parMap rpar else map
 > 	minimax     = if pColourToMove == White then maximumBy else minimumBy
-> 	deeper move = search False (maxdepth-1) (doMove pos move) (move:line)
+> 	deeper move = search False (depth-1) (doMove pos move) (move:line)
 
 In order to play a match vs. the computer, we need an interaction loop accepting input
 from the console.
@@ -608,3 +605,5 @@ have for sure already in the current position. This leads to cutoffs for paths o
 >				case cur_depth < maxdepth of
 >					True  -> iter_deep_loop maxdepth (cur_depth+2) (rating-0.3,rating+0.3) line
 >					False -> return (rating,line)
+
+\end{document}
