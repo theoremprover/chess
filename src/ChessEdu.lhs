@@ -129,8 +129,8 @@ We play on a cartesian board in two dimensions with the basis {north,east}:
 
 White's pawns move northwards, Black's pawns southwards.
 
-> pawnDir White = north
-> pawnDir Black = south
+> pawnStep White = north
+> pawnStep Black = south
 
 In order to print a board, we define a show_square function:
 
@@ -224,11 +224,11 @@ next move by saving the pawn's intermediate and target square.
 >	pEnPassant = case move of
 >		Move from to Nothing Nothing |
 >			Just (_,Ù) <- pBoard!from,
->			Just to == from +++ 2*pawn_dir,
->			Just middle <- from +++ pawn_dir -> Just (middle,to)
+>			Just to == from +++ 2*pawn_step,
+>			Just middle <- from +++ pawn_step -> Just (middle,to)
 >		_ | otherwise                        -> Nothing }
 > 	where
->	pawn_dir = pawnDir pColourToMove 
+>	pawn_step = pawnStep pColourToMove 
 >	(disabled_queenside,disabled_kingside) = case (pColourToMove,move) of
 > 		(_,    Castling _      ) -> (True, True )
 > 		(White,Move (E,1) _ _ _) -> (True, True )
@@ -283,7 +283,7 @@ Is a square threatened by a piece of a given colour?
 >	(move_from@(_,from_rank),Just (colour,piece)) <- assocs pBoard, colour==pColourToMove,
 >	(move_to@(_,to_rank),mb_takes) <- let
 >		initial_rank = if pColourToMove==White then 2 else 7
->		pawn_dir = pawnDir pColourToMove 
+>		pawn_step = pawnStep pColourToMove 
 > 		diagonals = [ north+east,north+west,south+east,south+west ]
 > 		straights = [ north,west,south,east ]
 >	 	knight_moves = [ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
@@ -298,7 +298,7 @@ Is a square threatened by a piece of a given colour?
 >			move@[ (to,Nothing) ] -> move ++ maybe_move_direction to δ
 >			_ | otherwise         -> []
 >		in case piece of
->			Ù -> ( case move_from +++ pawn_dir of
+>			Ù -> ( case move_from +++ pawn_step of
 
 If the square in front of the pawn direction is empty, it could move there:
 
@@ -307,7 +307,7 @@ If the square in front of the pawn direction is empty, it could move there:
 If, moreover, the pawn still stands on its initial position, it could even move two squares
 given that this target square is also empty:
 
->					case move_from +++ 2*pawn_dir of
+>					case move_from +++ 2*pawn_step of
 >						Just move_to2 | Nothing <- pBoard!move_to2, from_rank==initial_rank -> [ (move_to2,Nothing) ]
 >						_ -> []
 >				_            | otherwise -> [] ) ++
@@ -315,7 +315,7 @@ given that this target square is also empty:
 A pawn can take pieces diagonally in front of it,
 even intercepting a two square move of an opponent's pawn ("en passant"):
 
->				[ (move_to,Just take_on) | Just move_to <- map (move_from +++) [pawn_dir+east,pawn_dir+west],
+>				[ (move_to,Just take_on) | Just move_to <- map (move_from +++) [pawn_step+east,pawn_step+west],
 >					take_on <- case pBoard!move_to of
 
 If there is an opponent's piece on target square, one can take it:
@@ -390,7 +390,7 @@ or a checkmate if the king is in check:
 > 	(False,White) -> (mIN,  Just $ Winner Black Checkmate)
 > 	(False,Black) -> (mAX,  Just $ Winner White Checkmate)
 
-With only one bishop or knight (so called "light figures"), neither side can checkmate:
+With only one bishop or knight (so called "light figures"), one cannot checkmate:
 
 > rate pos@Position{..} | max_one_light_figure = (eQUAL,Just $ Draw NoWinPossible) where
 > 	max_one_light_figure = case sort $ filter ((/=Þ).snd) $ catMaybes $ elems pBoard of
