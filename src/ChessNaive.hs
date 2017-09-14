@@ -26,14 +26,16 @@ nextColour Black = White
 data Piece = Ù | Ú | Û | Ü | Ý | Þ
 	deriving (Eq,Enum,Bounded,Ord,Show)
 
-type Board = Array Coors Square
+type Board  = Array Coors Square
 type Square = Maybe (Colour,Piece)
 
 data File = A | B | C | D | E | F | G | H
-	deriving (Show,Eq,Ix,Ord,Enum)
-type Coors = (File,Int)
+	deriving (Show,Eq,Ix,Ord,Bounded,Enum)
+data Rank = R1 | R2 | R3 | R4 | R5 | R6 | R7 | R8
+	deriving (Show,Eq,Ix,Ord,Bounded,Enum)
+type Coors = (File,Rank)
 instance Show Coors where
-	show (file,rank) = map toLower (show file) ++ show rank
+	show (file,rank) = map toLower (show file) ++ drop 1 (show rank)
 
 data Position = Position {
 	pBoard              :: Board,
@@ -64,8 +66,8 @@ initialPosition = Position {
 allOfThem :: (Enum a,Bounded a,Ord a) => [a]
 allOfThem = [minBound..maxBound]
 
-baseRank White = 1
-baseRank Black = 8
+baseRank White = R1
+baseRank Black = R8
 
 (north,east) = ((0,1),(1,0))
 (south,west) = (-north,-east)
@@ -84,21 +86,24 @@ show_square darksquare square = case square of
 read_square c = lookup c [ (show_square dark (Just (col,piece)), (col,piece)) |
 	col <- allOfThem, piece <- allOfThem, dark <- allOfThem ]
 
-boardFromString s = array ((A,1),(H,8)) $ zip [ (f,r) | r <- [8,7..1], f <- [A .. H] ] (map read_square s)
+boardFromString s = array (minBound,maxBound) $ zip [ (f,r) | r <- reverse allOfThem, f <- allOfThem ] (map read_square s)
 instance Show Position where
 	show Position{..} = printf "¿ÀÀÀÀÀÀÀÀÁ\n%sÄÏÐÑÒÓÔÕÖÆ\n%s to do move %i\n"
-		(unlines $ map show_rank [8,7..1]) (show pColourToMove) pNextMoveNumber
+		(unlines $ map show_rank (reverse allOfThem)) (show pColourToMove) pNextMoveNumber
 		where
-		show_rank rank = [ "ÇÈÉÊËÌÍÎ" !! (fromEnum rank - 1) ] ++
-			[ show_square (is_darksquare (file,rank)) (pBoard!(file,rank)) | file <- [A .. H] ] ++ "Ã"
+		show_rank rank = [ "ÇÈÉÊËÌÍÎ" !! (fromEnum rank) ] ++
+			[ show_square (is_darksquare (file,rank)) (pBoard!(file,rank)) | file <- allOfThem ] ++ "Ã"
 			where
-			is_darksquare (file,rank) = mod (fromEnum rank + fromEnum file) 2 == 1
+			is_darksquare (file,rank) = mod (fromEnum rank + fromEnum file) 2 == 0
 
 infixl 6 +++
 (+++) :: Coors -> (Int,Int) -> Maybe Coors
-(file,rank) +++ (δfile,δrank) | ifile' `elem` [0..7] && rank' `elem` [1..8] =
-	Just (toEnum ifile',rank') where
-	(ifile',rank') = (fromEnum file + δfile, rank + δrank)
+(file,rank) +++ (δfile,δrank) | ifile' `elem` fileindices && irank' `elem` rankindices =
+	Just (toEnum ifile',toEnum irank')
+	where
+	fileindices = map fromEnum (allOfThem::[File])
+	rankindices = map fromEnum (allOfThem::[Rank])
+	(ifile',irank') = (fromEnum file + δfile, fromEnum rank + δrank)
 _ +++ _ = Nothing
 
 data Move =
@@ -121,48 +126,51 @@ instance Show Move where
 	show (Castling Queenside) = "O-O-O"
 	show (Castling Kingside)  = "O-O"
 
-doMove pos@Position{..} move = pos' {
-	pCanCastleQueenSide = if disabled_queenside then pColourToMove `delete` pCanCastleQueenSide else pCanCastleQueenSide,
-	pCanCastleKingSide  = if disabled_kingside  then pColourToMove `delete` pCanCastleKingSide  else pCanCastleKingSide,
+doMove pos@Position{..} move = pos {
+	pBoard              = pBoard // case move of
+		Move{..} -> ( case moveTakes of
+			Nothing -> []
+			Just take_coors -> [(take_coors,Nothing)] ) ++
+			[ (moveFrom,Nothing), (moveTo,case movePromote of
+				Nothing         -> pBoard!moveFrom
+				Just promote_to -> Just (pColourToMove,promote_to) ) ]
+		Castling Queenside -> [ ((A,r),Nothing), ((D,r),pBoard!(A,r)), ((E,r),Nothing), ((C,r),pBoard!(E,r)) ]
+		Castling Kingside  -> [ ((H,r),Nothing), ((F,r),pBoard!(H,r)), ((E,r),Nothing), ((G,r),pBoard!(E,r)) ],
+
+	pCanCastleQueenSide = (if forfeit_queenside then delete pColourToMove else id) pCanCastleQueenSide,
+	pCanCastleKingSide  = (if forfeit_kingside  then delete pColourToMove else id) pCanCastleKingSide,
 	pColourToMove       = nextColour pColourToMove,
 
-	pHalfmoveClock = case move of
-		Move { moveTakes = Just _ }                -> 0
+	pHalfmoveClock      = case move of
+		Move {..} | Just _      <- moveTakes       -> 0
 		Move {..} | Just (_,Ù) <- pBoard!moveFrom -> 0
-		_ | otherwise                              -> pHalfmoveClock + 1,
+		_         | otherwise                      -> pHalfmoveClock + 1,
 
-	pNextMoveNumber = if pColourToMove==Black then pNextMoveNumber+1 else pNextMoveNumber,
+	pNextMoveNumber     = if pColourToMove==Black then pNextMoveNumber+1 else pNextMoveNumber,
 
-	pEnPassant = case move of
+	pEnPassant          = case move of
 		Move from to Nothing Nothing |
 			Just (_,Ù) <- pBoard!from,
 			Just to == from +++ 2*pawn_step,
 			Just middle <- from +++ pawn_step -> Just (middle,to)
 		_ | otherwise                        -> Nothing }
+
 	where
-	pawn_step = pawnStep pColourToMove 
-	(disabled_queenside,disabled_kingside) = case (pColourToMove,move) of
-		(_,    Castling _      ) -> (True, True )
-		(White,Move (E,1) _ _ _) -> (True, True )
-		(Black,Move (E,8) _ _ _) -> (True, True )
-		(White,Move (A,1) _ _ _) -> (True, False)
-		(Black,Move (A,8) _ _ _) -> (True ,False)
-		(White,Move (H,1) _ _ _) -> (False,True )
-		(Black,Move (H,8) _ _ _) -> (False,True )
-		_ | otherwise            -> (False,False)
-	pos' = pos { pBoard = pBoard // case move of
-		Move{..} -> maybe [] (\ take_coors -> [(take_coors,Nothing)]) moveTakes ++
-			[ (moveFrom,Nothing), (moveTo,maybe (pBoard!moveFrom) (Just.(pColourToMove,)) movePromote) ]
-		Castling Queenside -> [ ((A,r),Nothing), ((D,r),pBoard!(A,r)), ((E,r),Nothing), ((C,r),pBoard!(E,r)) ]
-		Castling Kingside  -> [ ((H,r),Nothing), ((F,r),pBoard!(H,r)), ((E,r),Nothing), ((G,r),pBoard!(E,r)) ] } where
-		r = baseRank pColourToMove
+
+	pawn_step = pawnStep pColourToMove
+	r = baseRank pColourToMove
+	(forfeit_queenside,forfeit_kingside) = case move of
+		Castling _                   -> (True, True )
+		Move (A,rank) _ _ _ | rank == r -> (True, False)
+		Move (E,rank) _ _ _ | rank == r -> (True, True )
+		Move (H,rank) _ _ _ | rank == r -> (False,True )
+		_ | otherwise                   -> (False,False)
 
 data MatchResult = Winner Colour WinReason | Draw DrawReason deriving Show
 data WinReason  = Resignation | Checkmate deriving Show
 data DrawReason = Fifty_Halfmoves | Stalemate | NoWinPossible deriving Show
 
-moveGen pos@Position{..} = filter king_not_in_check $ potentialMoves pos
-	where
+moveGen pos@Position{..} = filter king_not_in_check $ potentialMoves pos where
 	king_not_in_check move = all (coorsNotInCheck pos_after_move pColourToMove) $ case move of
 		Castling Queenside -> [(E,r),(D,r),(C,r)]
 		Castling Kingside  -> [(E,r),(F,r),(G,r)]
@@ -185,7 +193,7 @@ potentialMoves pos@Position{..} = normal_moves ++ castling_moves where
 		(src,Just (colour,piece)) <- assocs pBoard,
 		colour==pColourToMove,
 		(dest@(_,to_rank),mb_takes) <- let
-			initial_rank = if pColourToMove==White then 2 else 7
+			initial_rank = if pColourToMove==White then R2 else R7
 			pawn_step = pawnStep pColourToMove 
 			diagonals    = [ north+east,north+west,south+east,south+west ]
 			straights    = [ north,west,south,east ]
@@ -206,7 +214,7 @@ potentialMoves pos@Position{..} = normal_moves ++ castling_moves where
 						case src +++ 2*pawn_step of
 							Just dest2 | square_empty dest2, snd src == initial_rank -> [ (dest2,Nothing) ]
 							_ -> []
-					_            | otherwise -> [] ) ++
+					_         | otherwise -> [] ) ++
 					[ (dest,Just take_on) | Just dest <- map (src +++) [pawn_step+east,pawn_step+west],
 						take_on <- case pBoard!dest of
 							Just (colour,_) | colour /= pColourToMove                                -> [ dest ]
@@ -246,7 +254,7 @@ rate pos@Position{..} | max_one_light_figure = (eQUAL,Just $ Draw NoWinPossible)
 rate pos = (rating,Nothing) where
 	rating = 0.01*mobility + sum [ (if colour==White then id else negate) (piece_val piece colour coors) |
 		(coors,Just (colour,piece)) <- assocs $ pBoard pos ]
-	piece_val Ù colour (_,rank) = 1 + case abs (rank - baseRank (nextColour colour)) of
+	piece_val Ù colour (_,rank) = 1 + case abs (fromEnum rank - fromEnum (baseRank (nextColour colour))) of
 				1             -> 4
 				2             -> 2
 				_ | otherwise -> 0
@@ -295,4 +303,3 @@ main = loop 2 initialPosition stackNew where
 				Just move -> execute_move move
 		where
 		execute_move move = loop maxdepth (doMove pos move) (stackPush pos_history pos)
-
