@@ -1,7 +1,4 @@
---We will use unicode symbols in the code and some language extensions...
-
-{-# LANGUAGE UnicodeSyntax,RecordWildCards,TypeSynonymInstances,FlexibleInstances,
-	OverlappingInstances,TupleSections,StandaloneDeriving,DeriveGeneric #-}
+{-# LANGUAGE UnicodeSyntax,RecordWildCards,FlexibleInstances,OverlappingInstances #-}
 
 module Main where
 
@@ -14,8 +11,6 @@ import Data.NumInstances
 import Data.Ord
 import Text.Printf
 import System.IO
-import System.CPUTime
-import System.Time
 
 data Colour = White | Black
 	deriving (Show,Eq,Enum,Bounded,Ord)
@@ -66,14 +61,14 @@ initialPosition = Position {
 allOfThem :: (Enum a,Bounded a,Ord a) => [a]
 allOfThem = [minBound..maxBound]
 
-baseRank White = R1
-baseRank Black = R8
-
 (north,east) = ((0,1),(1,0))
 (south,west) = (-north,-east)
 
 pawnStep White = north
 pawnStep Black = south
+
+baseRank White = R1
+baseRank Black = R8
 
 show_square darksquare square = case square of 
 	Nothing            | darksquare -> 'ç'
@@ -298,10 +293,12 @@ main = loop 2 initialPosition stackNew where
 					loop maxdepth pos pos_history
 				Just (stack',prev_pos) -> loop maxdepth prev_pos stack'
 			depth_str | [(depth,[])] <- reads depth_str -> loop depth pos pos_history
-			move_str -> case lookup move_str $ map (\ m -> (show m,m)) $ moveGen pos of
+			move_str -> case lookup move_str $ map (\ m -> (show m,m)) (moveGen pos) of
 				Nothing   -> do
 					putStrLn "This is no (legal) move or command."
 					loop maxdepth pos pos_history
 				Just move -> execute_move move
 		where
-		execute_move move = loop maxdepth (doMove pos move) (stackPush pos_history pos)
+		execute_move move = do
+			putStrLn $ "Moving " ++ show move
+			loop maxdepth (doMove pos move) (stackPush pos_history pos)
