@@ -98,13 +98,13 @@ instance Show Position where
 
 infixl 6 +++
 (+++) :: Coors -> (Int,Int) -> Maybe Coors
-(file,rank) +++ (δfile,δrank) | ifile' `elem` fileindices && irank' `elem` rankindices =
-	Just (toEnum ifile',toEnum irank')
+(file,rank) +++ (δfile,δrank) = case ifile' `elem` fileindices && irank' `elem` rankindices of
+	False -> Nothing
+	True  -> Just (toEnum ifile',toEnum irank')
 	where
 	fileindices = map fromEnum (allOfThem::[File])
 	rankindices = map fromEnum (allOfThem::[Rank])
 	(ifile',irank') = (fromEnum file + δfile, fromEnum rank + δrank)
-_ +++ _ = Nothing
 
 data Move =
 	Move {
@@ -127,6 +127,7 @@ instance Show Move where
 	show (Castling Kingside)  = "O-O"
 
 doMove pos@Position{..} move = pos {
+
 	pBoard              = pBoard // case move of
 		Move{..} -> ( case moveTakes of
 			Nothing -> []
@@ -172,9 +173,9 @@ data DrawReason = Fifty_Halfmoves | Stalemate | NoWinPossible deriving Show
 
 moveGen pos@Position{..} = filter king_not_in_check $ potentialMoves pos where
 	king_not_in_check move = all (coorsNotInCheck pos_after_move pColourToMove) $ case move of
+		Move{..}           -> [ kingsCoors pos_after_move pColourToMove ]
 		Castling Queenside -> [(E,r),(D,r),(C,r)]
 		Castling Kingside  -> [(E,r),(F,r),(G,r)]
-		Move{..}           -> [ kingsCoors pos_after_move pColourToMove ]
 		where
 		r = baseRank pColourToMove
 		pos_after_move = doMove pos move
@@ -183,8 +184,6 @@ coorsNotInCheck pos colour coors = all (/=coors) [ moveTo |
 	Move{..} <- potentialMoves $ pos {
 		pColourToMove = nextColour colour,
 		pBoard = pBoard pos // [ (coors,Just (colour,Ý)) ] } ]
-
-notInCheck pos@Position{..} = coorsNotInCheck pos pColourToMove $ kingsCoors pos pColourToMove
 
 kingsCoors pos colour = head [ coors | (coors,Just (col,Þ)) <- assocs (pBoard pos), col == colour ]
 
@@ -240,10 +239,13 @@ eQUAL       =     0.0
 
 rate :: Position -> (Rating,Maybe MatchResult)
 rate Position{..} | pHalfmoveClock >= 50 = (eQUAL,Just $ Draw Fifty_Halfmoves)
-rate pos | moveGen pos == [] = case (notInCheck pos,pColourToMove pos) of
-	(True,_)      -> (eQUAL,Just $ Draw Stalemate)
+rate pos@Position{..} | moveGen pos == [] = case (not_in_check,pColourToMove) of
+	(True ,_    ) -> (eQUAL,Just $ Draw Stalemate)
 	(False,White) -> (mIN,  Just $ Winner Black Checkmate)
 	(False,Black) -> (mAX,  Just $ Winner White Checkmate)
+	where
+	not_in_check = coorsNotInCheck pos pColourToMove $ kingsCoors pos pColourToMove
+
 rate pos@Position{..} | max_one_light_figure = (eQUAL,Just $ Draw NoWinPossible) where
 	max_one_light_figure = case sort $ filter ((/=Þ).snd) $ catMaybes $ elems pBoard of
 		[]                                                          -> True
