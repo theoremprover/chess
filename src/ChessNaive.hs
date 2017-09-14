@@ -239,12 +239,12 @@ eQUAL       =     0.0
 
 rate :: Position -> (Rating,Maybe MatchResult)
 rate Position{..} | pHalfmoveClock >= 50 = (eQUAL,Just $ Draw Fifty_Halfmoves)
-rate pos@Position{..} | moveGen pos == [] = case (not_in_check,pColourToMove) of
-	(True ,_    ) -> (eQUAL,Just $ Draw Stalemate)
-	(False,White) -> (mIN,  Just $ Winner Black Checkmate)
-	(False,Black) -> (mAX,  Just $ Winner White Checkmate)
+rate pos@Position{..} | moveGen pos == [] = case (king_in_check,pColourToMove) of
+	(False,_    ) -> (eQUAL,Just $ Draw Stalemate)
+	(True ,White) -> (mIN,  Just $ Winner Black Checkmate)
+	(True ,Black) -> (mAX,  Just $ Winner White Checkmate)
 	where
-	not_in_check = coorsNotInCheck pos pColourToMove $ kingsCoors pos pColourToMove
+	king_in_check = not $ coorsNotInCheck pos pColourToMove $ kingsCoors pos pColourToMove
 
 rate pos@Position{..} | max_one_light_figure = (eQUAL,Just $ Draw NoWinPossible) where
 	max_one_light_figure = case sort $ filter ((/=Þ).snd) $ catMaybes $ elems pBoard of
