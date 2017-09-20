@@ -2,6 +2,7 @@
 
 module Main where
 
+import Prelude.Unicode
 import Data.Char
 import Data.Array
 import Data.Maybe
@@ -93,13 +94,13 @@ instance Show Position where
 
 infixl 6 +++
 (+++) :: Coors -> (Int,Int) -> Maybe Coors
-(file,rank) +++ (δfile,δrank) = case ifile' `elem` fileindices && irank' `elem` rankindices of
+(file,rank) +++ (δfile,δrank) = case ifile ∈ fileindices ∧ irank ∈ rankindices of
 	False -> Nothing
-	True  -> Just (toEnum ifile',toEnum irank')
+	True  -> Just (toEnum ifile,toEnum irank)
 	where
 	fileindices = map fromEnum (allOfThem::[File])
 	rankindices = map fromEnum (allOfThem::[Rank])
-	(ifile',irank') = (fromEnum file + δfile, fromEnum rank + δrank)
+	(ifile,irank) = (fromEnum file + δfile, fromEnum rank + δrank)
 
 data Move =
 	Move {
@@ -156,11 +157,11 @@ doMove pos@Position{..} move = pos {
 	pawn_step = pawnStep pColourToMove
 	r = baseRank pColourToMove
 	(forfeit_queenside,forfeit_kingside) = case move of
-		Castling _                   -> (True, True )
+		Castling _                      -> (True, True )
 		Move (A,rank) _ _ _ | rank == r -> (True, False)
 		Move (E,rank) _ _ _ | rank == r -> (True, True )
 		Move (H,rank) _ _ _ | rank == r -> (False,True )
-		_ | otherwise                   -> (False,False)
+		_                   | otherwise -> (False,False)
 
 data MatchResult = Winner Colour WinReason | Draw DrawReason deriving Show
 data WinReason  = Resignation | Checkmate deriving Show
@@ -175,12 +176,17 @@ moveGen pos@Position{..} = filter king_not_in_check $ potentialMoves pos where
 		r = baseRank pColourToMove
 		pos_after_move = doMove pos move
 
-coorsNotInCheck pos colour coors = all (/=coors) [ moveTo |
+coorsNotInCheck pos colour coors = all (≠coors) [ moveTo |
 	Move{..} <- potentialMoves $ pos {
 		pColourToMove = nextColour colour,
 		pBoard = pBoard pos // [ (coors,Just (colour,Ý)) ] } ]
 
-kingsCoors pos colour = head [ coors | (coors,Just (col,Þ)) <- assocs (pBoard pos), col == colour ]
+kingsCoors Position{..} colour | (coors,Just (col,Þ)) <- assocs pBoard, col==colour = coors
+--kingsCoors Position{..} colour = find_king $ assocs pBoard where
+	find_king ((coors,Just (col,Þ)) : ass) = if col==colour then coors else find_king ass
+	find_king [] = error "The impossible happened: A king is missing!"
+-- fromJust $ lookup (Just (colour,Þ)) $ (elems pBoard,indices pBoard)
+--head [ coors | (coors,Just (col,Þ)) <- assocs pBoard, col == colour ]
 
 potentialMoves pos@Position{..} = normal_moves ++ castling_moves where
 	normal_moves = [ Move src dest mb_takes mb_promote |
@@ -222,8 +228,8 @@ potentialMoves pos@Position{..} = normal_moves ++ castling_moves where
 		mb_promote <- case piece of
 			Ù | to_rank == baseRank (nextColour pColourToMove) -> map Just [Ý,Ú,Û,Ü]
 			_ | otherwise                                      -> [ Nothing ] ]
-	castling_moves = [ Castling Kingside  | pColourToMove `elem` pCanCastleKingSide,  all square_empty [(F,r),(G,r)] ] ++
-		             [ Castling Queenside | pColourToMove `elem` pCanCastleQueenSide, all square_empty [(D,r),(C,r),(B,r)] ]
+	castling_moves = [ Castling Kingside  | pColourToMove ∈ pCanCastleKingSide,  all square_empty [(F,r),(G,r)] ] ++
+		             [ Castling Queenside | pColourToMove ∈ pCanCastleQueenSide, all square_empty [(D,r),(C,r),(B,r)] ]
 	r = baseRank pColourToMove
 	square_empty coors = isNothing $ pBoard!coors
 
@@ -247,7 +253,7 @@ rate pos@Position{..} | max_one_light_figure = (eQUAL,Just $ Draw NoWinPossible)
 		[(_,fig)]                   | all_light_figures [fig]       -> True
 		[(White,fig1),(Black,fig2)] | all_light_figures [fig1,fig2] -> True
 		_                           | otherwise                     -> False
-	all_light_figures = all (`elem` [Ú,Û])
+	all_light_figures = all (∈ [Ú,Û])
 rate pos = (rating,Nothing) where
 	rating = 0.01*mobility + sum [ (if colour==White then id else negate) (piece_val piece colour coors) |
 		(coors,Just (colour,piece)) <- assocs $ pBoard pos ]
@@ -268,7 +274,7 @@ type Depth = Int
 type Line = [Move]
 
 search :: Depth -> Position -> Line -> (Rating,Line)
-search depth pos              line | moveGen pos == [] || depth==0 = (fst $ rate pos,line)
+search depth pos              line | moveGen pos == [] ∨ depth==0 = (fst $ rate pos,line)
 search depth pos@Position{..} line = minimax (comparing fst) (map deeper $ moveGen pos) where
 	minimax     = if pColourToMove == White then maximumBy else minimumBy
 	deeper move = search (depth-1) (doMove pos move) (move:line)
