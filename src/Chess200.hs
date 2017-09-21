@@ -27,7 +27,7 @@ type Square = Maybe (Colour,Piece)
 
 type Coors = (Int,Int)
 instance Show Coors where
-	show (file,rank) = (chr $ ord 'a' + file - 1) : show (fromEnum rank + 1)
+	show (file,rank) = (chr $ ord 'a' + file - 1) : show rank
 
 data Position = Position {
 	pBoard              :: Board,
@@ -58,8 +58,10 @@ initialPosition = Position {
 allOfThem :: (Enum a,Bounded a,Ord a) => [a]
 allOfThem = [minBound..maxBound]
 
-boardFromString ranks = array ((0,0),(max_file,max_rank)) $ zip [ (f,r) | r <- reverse [0..max_rank], f <- [0..max_file] ] (concatMap (map read_square) ranks) where
-	(max_file,max_rank) = (maximum (map length ranks) - 1,length ranks - 1)
+boardFromString ranks = array ((1,1),(max_f,max_r)) $ zip [ (f,r) | r <- reverse [1..max_r], f <- [1..max_f] ]
+	(concatMap (map read_square) ranks)
+	where
+	(max_f,max_r) = (maximum (map length ranks),length ranks)
 
 (north,east) = ((0,1),(1,0))
 (south,west) = (-north,-east)
@@ -83,12 +85,10 @@ read_square c = lookup c [ (show_square dark (Just (col,piece)), (col,piece)) |
 
 instance Show Position where
 	show Position{..} = printf "¡¢¢¢¢¢¢¢¢£\n%s¦±²³´µ¶·¸¨\n%s to do move %i\n"
-		(unlines $ map show_rank (reverse allOfThem)) (show pColourToMove) pNextMoveNumber
+		(unlines [ show_rank r | r <- reverse [min_r..max_r] ]) (show pColourToMove) pNextMoveNumber
 		where
-		show_rank rank = [ "©ª«¬»®¯°" !! (fromEnum rank) ] ++
-			[ show_square (is_darksquare (file,rank)) (pBoard!(file,rank)) | file <- allOfThem ] ++ "¥"
-			where
-			is_darksquare (file,rank) = mod (fromEnum rank + fromEnum file) 2 == 0
+		((min_f,min_r),(max_f,max_r)) = bounds pBoard
+		show_rank r = (" ©ª«¬»®¯°" !! r) : [ show_square (mod (f+r) 2 == 0) (pBoard!(f,r)) | f <- [min_f..max_f] ] ++ "¥"
 
 addCoors board coors offset = case coors+offset of
 	coors' | coors' `elem` (indices board) -> Just coors'
@@ -171,12 +171,7 @@ coorsNotInCheck pos colour coors = all (≠coors) [ moveTo |
 		pColourToMove = nextColour colour,
 		pBoard = pBoard pos // [ (coors,Just (colour,Ý)) ] } ]
 
-kingsCoors Position{..} colour = fromJust $ lookup (Just (colour,Þ)) $ zip (elems pBoard) (indices pBoard)
---kingsCoors Position{..} colour = find_king $ assocs pBoard where
---	find_king ((coors,Just (col,Þ)) : ass) = if col==colour then coors else find_king ass
---	find_king [] = error "The impossible happened: A king is missing!"
--- fromJust $ lookup (Just (colour,Þ)) $ (elems pBoard,indices pBoard)
---head [ coors | (coors,Just (col,Þ)) <- assocs pBoard, col == colour ]
+kingsCoors Position{..} colour = head [ coors | (coors,Just (col,Þ)) <- assocs pBoard, col == colour ]
 
 potentialMoves pos@Position{..} = normal_moves ++ castling_moves where
 	normal_moves = [ Move src dest mb_takes mb_promote |
