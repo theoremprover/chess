@@ -31,7 +31,7 @@ data Rank = È | É | Ê | Ë | Ì | Í | Î | Ï
 	deriving (Show,Eq,Ix,Ord,Bounded,Enum)
 type Coors = (File,Rank)
 instance Show Coors where
-	show (file,rank) = show file ++ show rank
+	show (file,rank) = (chr $ ord 'a' + fromEnum file) : show (fromEnum rank + 1)
 
 data Position = Position {
 	pBoard              :: Board,
