@@ -1,4 +1,4 @@
-{-# LANGUAGE UnicodeSyntax,RecordWildCards,FlexibleInstances,OverlappingInstances #-}
+{-# LANGUAGE UnicodeSyntax,RecordWildCards,FlexibleInstances,OverlappingInstances,TupleSections #-}
 
 module Main where
 
@@ -25,13 +25,9 @@ data Piece = Ù | Ú | Û | Ü | Ý | Þ
 type Board  = Array Coors Square
 type Square = Maybe (Colour,Piece)
 
-data File = À | Á | Â | Ã | Ä | Å | Æ | Ç
-	deriving (Show,Eq,Ix,Ord,Bounded,Enum)
-data Rank = È | É | Ê | Ë | Ì | Í | Î | Ï
-	deriving (Show,Eq,Ix,Ord,Bounded,Enum)
-type Coors = (File,Rank)
+type Coors = (Int,Int)
 instance Show Coors where
-	show (file,rank) = (chr $ ord 'a' + fromEnum file) : show (fromEnum rank + 1)
+	show (file,rank) = (chr $ ord 'a' + file - 1) : show (fromEnum rank + 1)
 
 data Position = Position {
 	pBoard              :: Board,
@@ -43,15 +39,15 @@ data Position = Position {
 	pNextMoveNumber     :: Int }
 
 initialPosition = Position {
-	pBoard = boardFromString $
-		"âïáòäðàñ" ++
-		"îßîßîßîß" ++
-		"ØçØçØçØç" ++
-		"çØçØçØçØ" ++
-		"ØçØçØçØç" ++
-		"çØçØçØçØ" ++
-		"ÙèÙèÙèÙè" ++
-		"ëÚêÝíÛéÜ",
+	pBoard = boardFromString [
+		"âïáòäðàñ",
+		"îßîßîßîß",
+		"ØçØçØçØç",
+		"çØçØçØçØ",
+		"ØçØçØçØç",
+		"çØçØçØçØ",
+		"ÙèÙèÙèÙè",
+		"ëÚêÝíÛéÜ" ],
 	pColourToMove       = White,
 	pCanCastleQueenSide = allOfThem,
 	pCanCastleKingSide  = allOfThem,
@@ -62,14 +58,17 @@ initialPosition = Position {
 allOfThem :: (Enum a,Bounded a,Ord a) => [a]
 allOfThem = [minBound..maxBound]
 
+boardFromString ranks = array ((0,0),(max_file,max_rank)) $ zip [ (f,r) | r <- reverse [0..max_rank], f <- [0..max_file] ] (concatMap (map read_square) ranks) where
+	(max_file,max_rank) = (maximum (map length ranks) - 1,length ranks - 1)
+
 (north,east) = ((0,1),(1,0))
 (south,west) = (-north,-east)
 
 pawnStep White = north
 pawnStep Black = south
 
-baseRank White = È
-baseRank Black = Ï
+baseRank White = 1
+baseRank Black = 8
 
 show_square darksquare square = case square of 
 	Nothing            | darksquare -> 'ç'
@@ -82,7 +81,6 @@ show_square darksquare square = case square of
 read_square c = lookup c [ (show_square dark (Just (col,piece)), (col,piece)) |
 	col <- allOfThem, piece <- allOfThem, dark <- allOfThem ]
 
-boardFromString s = array (minBound,maxBound) $ zip [ (f,r) | r <- reverse allOfThem, f <- allOfThem ] (map read_square s)
 instance Show Position where
 	show Position{..} = printf "¡¢¢¢¢¢¢¢¢£\n%s¦±²³´µ¶·¸¨\n%s to do move %i\n"
 		(unlines $ map show_rank (reverse allOfThem)) (show pColourToMove) pNextMoveNumber
@@ -92,15 +90,9 @@ instance Show Position where
 			where
 			is_darksquare (file,rank) = mod (fromEnum rank + fromEnum file) 2 == 0
 
-infixl 6 +++
-(+++) :: Coors -> (Int,Int) -> Maybe Coors
-(file,rank) +++ (δfile,δrank) = case ifile ∈ fileindices ∧ irank ∈ rankindices of
-	False -> Nothing
-	True  -> Just (toEnum ifile,toEnum irank)
-	where
-	fileindices = map fromEnum (allOfThem::[File])
-	rankindices = map fromEnum (allOfThem::[Rank])
-	(ifile,irank) = (fromEnum file + δfile, fromEnum rank + δrank)
+addCoors board coors offset = case coors+offset of
+	coors' | coors' `elem` (indices board) -> Just coors'
+	_      | otherwise                     -> Nothing
 
 data Move =
 	Move {
@@ -131,8 +123,8 @@ doMove pos@Position{..} move = pos {
 			[ (moveFrom,Nothing), (moveTo,case movePromote of
 				Nothing         -> pBoard!moveFrom
 				Just promote_to -> Just (pColourToMove,promote_to) ) ]
-		Castling Queenside -> [ ((À,r),Nothing), ((Ã,r),pBoard!(À,r)), ((Ä,r),Nothing), ((Â,r),pBoard!(Ä,r)) ]
-		Castling Kingside  -> [ ((Ç,r),Nothing), ((Å,r),pBoard!(Ç,r)), ((Ä,r),Nothing), ((Æ,r),pBoard!(Ä,r)) ],
+		Castling Queenside -> [ ((1,r),Nothing), ((4,r),pBoard!(1,r)), ((5,r),Nothing), ((3,r),pBoard!(5,r)) ]
+		Castling Kingside  -> [ ((8,r),Nothing), ((6,r),pBoard!(8,r)), ((5,r),Nothing), ((7,r),pBoard!(5,r)) ],
 
 	pCanCastleQueenSide = (if forfeit_queenside then delete pColourToMove else id) pCanCastleQueenSide,
 	pCanCastleKingSide  = (if forfeit_kingside  then delete pColourToMove else id) pCanCastleKingSide,
@@ -148,9 +140,9 @@ doMove pos@Position{..} move = pos {
 	pEnPassant          = case move of
 		Move from to Nothing Nothing |
 			Just (_,Ù) <- pBoard!from,
-			Just to == from +++ 2*pawn_step,
-			Just middle <- from +++ pawn_step -> Just (middle,to)
-		_ | otherwise                        -> Nothing }
+			Just to == addCoors pBoard from (2*pawn_step),
+			Just middle <- addCoors pBoard from pawn_step -> Just (middle,to)
+		_ | otherwise                                     -> Nothing }
 
 	where
 
@@ -158,9 +150,9 @@ doMove pos@Position{..} move = pos {
 	r = baseRank pColourToMove
 	(forfeit_queenside,forfeit_kingside) = case move of
 		Castling _                      -> (True, True )
-		Move (À,rank) _ _ _ | rank == r -> (True, False)
-		Move (Ä,rank) _ _ _ | rank == r -> (True, True )
-		Move (Ç,rank) _ _ _ | rank == r -> (False,True )
+		Move (1,rank) _ _ _ | rank == r -> (True, False)
+		Move (5,rank) _ _ _ | rank == r -> (True, True )
+		Move (8,rank) _ _ _ | rank == r -> (False,True )
 		_                   | otherwise -> (False,False)
 data MatchResult = Winner Colour WinReason | Draw DrawReason deriving Show
 data WinReason  = Resignation | Checkmate deriving Show
@@ -169,10 +161,9 @@ data DrawReason = Fifty_Halfmoves | Stalemate | NoWinPossible deriving Show
 moveGen pos@Position{..} = filter king_not_in_check $ potentialMoves pos where
 	king_not_in_check move = all (coorsNotInCheck pos_after_move pColourToMove) $ case move of
 		Move{..}           -> [ kingsCoors pos_after_move pColourToMove ]
-		Castling Queenside -> [(Ä,r),(Ã,r),(Â,r)]
-		Castling Kingside  -> [(Ä,r),(Å,r),(Æ,r)]
+		Castling Queenside -> map (,baseRank pColourToMove) [3..5]
+		Castling Kingside  -> map (,baseRank pColourToMove) [5..7]
 		where
-		r = baseRank pColourToMove
 		pos_after_move = doMove pos move
 
 coorsNotInCheck pos colour coors = all (≠coors) [ moveTo |
@@ -192,12 +183,12 @@ potentialMoves pos@Position{..} = normal_moves ++ castling_moves where
 		(src,Just (colour,piece)) <- assocs pBoard,
 		colour==pColourToMove,
 		(dest@(_,to_rank),mb_takes) <- let
-			initial_rank = if pColourToMove==White then É else Î
+			initial_rank = if pColourToMove==White then 2 else 7
 			pawn_step = pawnStep pColourToMove 
 			diagonals    = [ north+east,north+west,south+east,south+west ]
 			straights    = [ north,west,south,east ]
 			knight_moves = [ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
-			maybe_move from δ = case from +++ δ of
+			maybe_move from δ = case addCoors pBoard from δ of
 				Nothing -> []
 				Just dest -> case pBoard!dest of
 					Nothing                             -> [ (dest,Nothing) ]
@@ -208,13 +199,13 @@ potentialMoves pos@Position{..} = normal_moves ++ castling_moves where
 				move@[ (to,Nothing) ] -> move ++ maybe_move_direction to δ
 				_ | otherwise         -> []
 			in case piece of
-				Ù -> ( case src +++ pawn_step of
+				Ù -> ( case addCoors pBoard src pawn_step of
 					Just dest | square_empty dest -> [ (dest,Nothing) ] ++
-						case src +++ 2*pawn_step of
+						case addCoors pBoard src (2*pawn_step) of
 							Just dest2 | square_empty dest2, snd src == initial_rank -> [ (dest2,Nothing) ]
 							_ -> []
 					_         | otherwise -> [] ) ++
-					[ (dest,Just take_on) | Just dest <- map (src +++) [pawn_step+east,pawn_step+west],
+					[ (dest,Just take_on) | Just dest <- map (addCoors pBoard src) [pawn_step+east,pawn_step+west],
 						take_on <- case pBoard!dest of
 							Just (colour,_) | colour /= pColourToMove                                -> [ dest ]
 							_               | Just (middle,pawn_coors) <- pEnPassant, middle == dest -> [ pawn_coors ]
@@ -227,8 +218,8 @@ potentialMoves pos@Position{..} = normal_moves ++ castling_moves where
 		mb_promote <- case piece of
 			Ù | to_rank == baseRank (nextColour pColourToMove) -> map Just [Ý,Ú,Û,Ü]
 			_ | otherwise                                      -> [ Nothing ] ]
-	castling_moves = [ Castling Kingside  | pColourToMove ∈ pCanCastleKingSide,  all square_empty [(Å,r),(Æ,r)] ] ++
-		             [ Castling Queenside | pColourToMove ∈ pCanCastleQueenSide, all square_empty [(Ã,r),(Â,r),(Á,r)] ]
+	castling_moves = [ Castling Kingside  | pColourToMove ∈ pCanCastleKingSide,  all square_empty [(6,r),(7,r)] ] ++
+		             [ Castling Queenside | pColourToMove ∈ pCanCastleQueenSide, all square_empty [(4,r),(3,r),(2,r)] ]
 	r = baseRank pColourToMove
 	square_empty coors = isNothing $ pBoard!coors
 
