@@ -123,17 +123,17 @@ doMove pos@Position{..} move = pos {
 			[ (moveFrom,Nothing), (moveTo,case movePromote of
 				Nothing         -> pBoard!moveFrom
 				Just promote_to -> Just (pColourToMove,promote_to) ) ]
-		Castling Queenside -> [ ((1,r),Nothing), ((4,r),pBoard!(1,r)), ((5,r),Nothing), ((3,r),pBoard!(5,r)) ]
-		Castling Kingside  -> [ ((8,r),Nothing), ((6,r),pBoard!(8,r)), ((5,r),Nothing), ((7,r),pBoard!(5,r)) ],
+		Castling Queenside -> [ ((1,base),Nothing), ((4,base),pBoard!(1,base)), ((5,base),Nothing), ((3,base),pBoard!(5,base)) ]
+		Castling Kingside  -> [ ((8,base),Nothing), ((6,base),pBoard!(8,base)), ((5,base),Nothing), ((7,base),pBoard!(5,base)) ],
 
 	pCanCastleQueenSide = (if forfeit_queenside then delete pColourToMove else id) pCanCastleQueenSide,
 	pCanCastleKingSide  = (if forfeit_kingside  then delete pColourToMove else id) pCanCastleKingSide,
 	pColourToMove       = nextColour pColourToMove,
 
 	pHalfmoveClock      = case move of
-		Move {..} | Just _      <- moveTakes       -> 0
-		Move {..} | Just (_,Ù) <- pBoard!moveFrom -> 0
-		_         | otherwise                      -> pHalfmoveClock + 1,
+		Move{..} | Just _      <- moveTakes       -> 0
+		Move{..} | Just (_,Ù) <- pBoard!moveFrom -> 0
+		_        | otherwise                      -> pHalfmoveClock + 1,
 
 	pNextMoveNumber     = if pColourToMove==Black then pNextMoveNumber+1 else pNextMoveNumber,
 
@@ -147,31 +147,28 @@ doMove pos@Position{..} move = pos {
 	where
 
 	pawn_step = pawnStep pColourToMove
-	r = baseRank pColourToMove
+	base = baseRank pColourToMove
 	(forfeit_queenside,forfeit_kingside) = case move of
-		Castling _                      -> (True, True )
-		Move (1,rank) _ _ _ | rank == r -> (True, False)
-		Move (5,rank) _ _ _ | rank == r -> (True, True )
-		Move (8,rank) _ _ _ | rank == r -> (False,True )
-		_                   | otherwise -> (False,False)
-data MatchResult = Winner Colour WinReason | Draw DrawReason deriving Show
-data WinReason  = Resignation | Checkmate deriving Show
-data DrawReason = Fifty_Halfmoves | Stalemate | NoWinPossible deriving Show
+		Castling _                         -> (True, True )
+		Move (1,rank) _ _ _ | rank == base -> (True, False)
+		Move (5,rank) _ _ _ | rank == base -> (True, True )
+		Move (8,rank) _ _ _ | rank == base -> (False,True )
+		_                   | otherwise    -> (False,False)
 
 moveGen pos@Position{..} = filter king_not_in_check $ potentialMoves pos where
-	king_not_in_check move = all (coorsNotInCheck pos_after_move pColourToMove) $ case move of
-		Move{..}           -> [ kingsCoors pos_after_move pColourToMove ]
+	king_not_in_check move = all (coorsNotInCheck pos_after_move) $ case move of
+		Move{..}           -> [ kingsCoors pos_after_move ]
 		Castling Queenside -> map (,baseRank pColourToMove) [3..5]
 		Castling Kingside  -> map (,baseRank pColourToMove) [5..7]
 		where
-		pos_after_move = doMove pos move
+		pos_after_move = (doMove pos move) { pColourToMove = pColourToMove }
 
-coorsNotInCheck pos colour coors = all (≠coors) [ moveTo |
-	Move{..} <- potentialMoves $ pos {
-		pColourToMove = nextColour colour,
-		pBoard = pBoard pos // [ (coors,Just (colour,Ý)) ] } ]
+coorsNotInCheck pos@Position{..} coors = all (≠coors) [ moveTo |
+	Move{..} <- potentialMoves $ pos { -- Castling moves cannot take a piece, hence it is not needed here
+		pColourToMove = nextColour pColourToMove,
+		pBoard = pBoard // [ (coors,Just (pColourToMove,Ý)) ] } ]  -- Place some figure at coors in order to also catch pawn takes
 
-kingsCoors Position{..} colour = head [ coors | (coors,Just (col,Þ)) <- assocs pBoard, col == colour ]
+kingsCoors Position{..} = head [ coors | (coors,Just (col,Þ)) <- assocs pBoard, col == pColourToMove ]
 
 potentialMoves pos@Position{..} = normal_moves ++ castling_moves where
 	normal_moves = [ Move src dest mb_takes mb_promote |
@@ -186,13 +183,13 @@ potentialMoves pos@Position{..} = normal_moves ++ castling_moves where
 			maybe_move from δ = case addCoors pBoard from δ of
 				Nothing -> []
 				Just dest -> case pBoard!dest of
-					Nothing                             -> [ (dest,Nothing) ]
-					Just (col,_) | col /= pColourToMove -> [ (dest,Just dest) ]
-					_            | otherwise            -> []
+					Nothing                            -> [ (dest,Nothing) ]
+					Just (col,_) | col ≠ pColourToMove -> [ (dest,Just dest) ]
+					_            | otherwise           -> []
 			maybe_move_direction from δ = case maybe_move from δ of
-				move@[ (_,Just _)   ] -> move
-				move@[ (to,Nothing) ] -> move ++ maybe_move_direction to δ
-				_ | otherwise         -> []
+				moves@[ (_,Just _)   ] -> moves
+				moves@[ (to,Nothing) ] -> moves ++ maybe_move_direction to δ
+				_ | otherwise          -> []
 			in case piece of
 				Ù -> ( case addCoors pBoard src pawn_step of
 					Just dest | square_empty dest -> [ (dest,Nothing) ] ++
@@ -202,7 +199,7 @@ potentialMoves pos@Position{..} = normal_moves ++ castling_moves where
 					_         | otherwise -> [] ) ++
 					[ (dest,Just take_on) | Just dest <- map (addCoors pBoard src) [pawn_step+east,pawn_step+west],
 						take_on <- case pBoard!dest of
-							Just (colour,_) | colour /= pColourToMove                                -> [ dest ]
+							Just (colour,_) | colour ≠ pColourToMove                                 -> [ dest ]
 							_               | Just (middle,pawn_coors) <- pEnPassant, middle == dest -> [ pawn_coors ]
 							_               | otherwise                                              -> [] ]
 				Ú -> concatMap (maybe_move           src) knight_moves
@@ -213,10 +210,14 @@ potentialMoves pos@Position{..} = normal_moves ++ castling_moves where
 		mb_promote <- case piece of
 			Ù | to_rank == baseRank (nextColour pColourToMove) -> map Just [Ý,Ú,Û,Ü]
 			_ | otherwise                                      -> [ Nothing ] ]
-	castling_moves = [ Castling Kingside  | pColourToMove ∈ pCanCastleKingSide,  all square_empty [(6,r),(7,r)] ] ++
-		             [ Castling Queenside | pColourToMove ∈ pCanCastleQueenSide, all square_empty [(4,r),(3,r),(2,r)] ]
-	r = baseRank pColourToMove
+	castling_moves = [ Castling Kingside  | pColourToMove ∈ pCanCastleKingSide,  all square_empty [(6,base),(7,base)] ] ++
+		             [ Castling Queenside | pColourToMove ∈ pCanCastleQueenSide, all square_empty [(4,base),(3,base),(2,base)] ]
+	base = baseRank pColourToMove
 	square_empty coors = isNothing $ pBoard!coors
+
+data MatchResult = Winner Colour WinReason | Draw DrawReason deriving Show
+data WinReason   = Resignation | Checkmate deriving Show
+data DrawReason  = Fifty_Halfmoves | Stalemate | NoMatePossible deriving Show
 
 type Rating = Float
 mAX         = 10000.0
@@ -224,21 +225,26 @@ mIN         = negate mAX
 eQUAL       =     0.0
 
 rate :: Position -> (Rating,Maybe MatchResult)
+
 rate Position{..} | pHalfmoveClock >= 50 = (eQUAL,Just $ Draw Fifty_Halfmoves)
+
 rate pos@Position{..} | moveGen pos == [] = case (king_in_check,pColourToMove) of
 	(False,_    ) -> (eQUAL,Just $ Draw Stalemate)
 	(True ,White) -> (mIN,  Just $ Winner Black Checkmate)
 	(True ,Black) -> (mAX,  Just $ Winner White Checkmate)
 	where
-	king_in_check = not $ coorsNotInCheck pos pColourToMove $ kingsCoors pos pColourToMove
+	king_in_check = not $ coorsNotInCheck pos $ kingsCoors pos
 
-rate pos@Position{..} | max_one_light_figure = (eQUAL,Just $ Draw NoWinPossible) where
-	max_one_light_figure = case sort $ filter ((/=Þ).snd) $ catMaybes $ elems pBoard of
-		[]                                                          -> True
-		[(_,fig)]                   | all_light_figures [fig]       -> True
-		[(White,fig1),(Black,fig2)] | all_light_figures [fig1,fig2] -> True
-		_                           | otherwise                     -> False
+replace -> with unicode
+
+rate pos@Position{..} | max_one_light_figure = (eQUAL,Just $ Draw NoMatePossible) where
+	max_one_light_figure = case sort $ filter ((≠Þ).snd) $ catMaybes $ elems pBoard of
+		[]                                                                     -> True
+		[(_,fig)]                 | all_light_figures [fig]                    -> True
+		[(col1,fig1),(col2,fig2)] | col1≠col2 ∧ all_light_figures [fig1,fig2] -> True
+		_                         | otherwise                                  -> False
 	all_light_figures = all (∈ [Ú,Û])
+
 rate pos = (rating,Nothing) where
 	rating = 0.01*mobility + sum [ (if colour==White then id else negate) (piece_val piece colour coors) |
 		(coors,Just (colour,piece)) <- assocs $ pBoard pos ]
@@ -260,9 +266,9 @@ type Line = [Move]
 
 search :: Depth -> Position -> Line -> (Rating,Line)
 search depth pos              line | moveGen pos == [] ∨ depth==0 = (fst $ rate pos,line)
-search depth pos@Position{..} line = minimax (comparing fst) (map deeper $ moveGen pos) where
-	minimax     = if pColourToMove == White then maximumBy else minimumBy
-	deeper move = search (depth-1) (doMove pos move) (move:line)
+search depth pos@Position{..} line = minimax (comparing fst) (map go_deeper $ moveGen pos) where
+	minimax        = if pColourToMove == White then maximumBy else minimumBy
+	go_deeper move = search (depth-1) (doMove pos move) (move:line)
 
 main = loop 2 initialPosition stackNew where
 	loop :: Depth -> Position -> Stack Position -> IO ()
