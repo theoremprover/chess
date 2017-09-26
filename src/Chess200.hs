@@ -59,8 +59,9 @@ allOfThem :: (Enum a,Bounded a,Ord a) => [a]
 allOfThem = [minBound..maxBound]
 
 boardFromString ranks = array ((1,1),(max_f,max_r)) $ zip [ (f,r) | r <- reverse [1..max_r], f <- [1..max_f] ]
-	(concatMap (map read_square) ranks)
+	(concatMap read_rank ranks)
 	where
+	read_rank = map read_square
 	(max_f,max_r) = (maximum (map length ranks),length ranks)
 
 (north,east) = ((0,1),(1,0))
@@ -164,7 +165,7 @@ moveGen pos@Position{..} = filter king_not_in_check $ potentialMoves pos where
 		pos_after_move = (doMove pos move) { pColourToMove = pColourToMove }
 
 coorsNotInCheck pos@Position{..} coors = all (≠coors) [ moveTo |
-	Move{..} <- potentialMoves $ pos { -- Castling moves cannot take a piece, hence it is not needed here
+	Move{..} <- potentialMoves $ pos { -- Castling moves do not take a piece, hence it is not considered here
 		pColourToMove = nextColour pColourToMove,
 		pBoard = pBoard // [ (coors,Just (pColourToMove,Ý)) ] } ]  -- Place some figure at coors in order to also catch pawn takes
 
@@ -176,12 +177,12 @@ potentialMoves pos@Position{..} = normal_moves ++ castling_moves where
 		colour==pColourToMove,
 		(dest@(_,to_rank),mb_takes) <- let
 			initial_rank = if pColourToMove==White then 2 else 7
-			pawn_step = pawnStep pColourToMove 
+			pawn_step    = pawnStep pColourToMove
 			diagonals    = [ north+east,north+west,south+east,south+west ]
 			straights    = [ north,west,south,east ]
 			knight_moves = [ north+2*east,north+2*west,2*north+west,2*north+east,south+2*west,south+2*east,2*south+west,2*south+east ]
 			maybe_move from δ = case addCoors pBoard from δ of
-				Nothing → []
+				Nothing   → []
 				Just dest → case pBoard!dest of
 					Nothing                            → [ (dest,Nothing) ]
 					Just (col,_) | col ≠ pColourToMove → [ (dest,Just dest) ]
@@ -209,7 +210,7 @@ potentialMoves pos@Position{..} = normal_moves ++ castling_moves where
 				Þ → concatMap (maybe_move           src) (straights++diagonals),
 		mb_promote <- case piece of
 			Ù | to_rank == baseRank (nextColour pColourToMove) → map Just [Ý,Ú,Û,Ü]
-			_ | otherwise                                      → [ Nothing ] ]
+			_ | otherwise                                       → [ Nothing ] ]
 	castling_moves = [ Castling Kingside  | pColourToMove ∈ pCanCastleKingSide,  all square_empty [(6,base),(7,base)] ] ++
 		             [ Castling Queenside | pColourToMove ∈ pCanCastleQueenSide, all square_empty [(4,base),(3,base),(2,base)] ]
 	base = baseRank pColourToMove
