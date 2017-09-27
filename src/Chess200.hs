@@ -249,7 +249,7 @@ rate pos = (rating,Nothing) where
 	rating = 0.01*mobility + sum [ (if colour==White then id else negate) (piece_val piece colour coors) |
 		(coors,Just (colour,piece)) <- assocs $ pBoard pos ]
 	piece_val fig colour (_,rank) = case fig of
-		Ù → 1 + case abs $ fromEnum rank - fromEnum $ baseRank (nextColour colour) of
+		Ù → 1 + case abs (fromEnum rank - fromEnum (baseRank (nextColour colour))) of
 			1             → 4
 			2             → 2
 			_ | otherwise → 0
