@@ -192,16 +192,17 @@ potentialMoves pos@Position{..} = normal_moves ++ castling_moves where
 				moves@[ (to,Nothing) ] → moves ++ maybe_move_direction to δ
 				_ | otherwise          → []
 			in case piece of
-				Ù → ( case addCoors pBoard src pawn_step of
-					Just dest | square_empty dest → [ (dest,Nothing) ] ++
-						case addCoors pBoard src (2*pawn_step) of
-							Just dest2 | square_empty dest2, snd src == initial_rank → [ (dest2,Nothing) ]
-							_ → []
-					_         | otherwise → [] ) ++
-					[ (dest,Just take_on) | Just dest <- map (addCoors pBoard src) [pawn_step+east,pawn_step+west],
-						take_on <- case pBoard!dest of
+				Ù → pawn_moves ++ pawn_takes where
+					Just dest   = addCoors pBoard src pawn_step   -- There cannot be a pawn on the opposite base rank
+					pawn_moves  = if square_empty dest then [ (dest,Nothing) ] ++ pawn_double else []
+					pawn_double = case addCoors pBoard src (2*pawn_step) of
+						Just dest2 | square_empty dest2 ∧ snd src == initial_rank → [ (dest2,Nothing) ]
+						_          | otherwise                                    → []
+					pawn_takes  = [ (dest,Just take_on) |
+						Just dest <- map (addCoors pBoard src) [pawn_step+east,pawn_step+west],
+						take_on   <- case pBoard!dest of
 							Just (colour,_) | colour ≠ pColourToMove                                 → [ dest ]
-							_               | Just (middle,pawn_coors) <- pEnPassant, middle == dest → [ pawn_coors ]
+							Nothing         | Just (middle,pawn_coors) <- pEnPassant, middle == dest → [ pawn_coors ]
 							_               | otherwise                                              → [] ]
 				Ú → concatMap (maybe_move           src) knight_moves
 				Û → concatMap (maybe_move_direction src) diagonals
@@ -210,14 +211,14 @@ potentialMoves pos@Position{..} = normal_moves ++ castling_moves where
 				Þ → concatMap (maybe_move           src) (straights++diagonals),
 		mb_promote <- case piece of
 			Ù | to_rank == baseRank (nextColour pColourToMove) → map Just [Ý,Ú,Û,Ü]
-			_ | otherwise                                       → [ Nothing ] ]
+			_ | otherwise                                      → [ Nothing ] ]
 	castling_moves = [ Castling Kingside  | pColourToMove ∈ pCanCastleKingSide,  all square_empty [(6,base),(7,base)] ] ++
 		             [ Castling Queenside | pColourToMove ∈ pCanCastleQueenSide, all square_empty [(4,base),(3,base),(2,base)] ]
 	base = baseRank pColourToMove
-	square_empty coors = isNothing $ pBoard!coors
+	square_empty = isNothing . (pBoard!)
 
-data MatchResult = Winner Colour WinReason | Draw DrawReason deriving Show
-data WinReason   = Resignation | Checkmate deriving Show
+data MatchResult = Winner Colour WinReason | Draw DrawReason    deriving Show
+data WinReason   = Resignation | Checkmate                      deriving Show
 data DrawReason  = Fifty_Halfmoves | Stalemate | NoMatePossible deriving Show
 
 type Rating = Float
@@ -247,15 +248,16 @@ rate pos@Position{..} | max_one_light_figure = (eQUAL,Just $ Draw NoMatePossible
 rate pos = (rating,Nothing) where
 	rating = 0.01*mobility + sum [ (if colour==White then id else negate) (piece_val piece colour coors) |
 		(coors,Just (colour,piece)) <- assocs $ pBoard pos ]
-	piece_val Ù colour (_,rank) = 1 + case abs (fromEnum rank - fromEnum (baseRank (nextColour colour))) of
-				1             → 4
-				2             → 2
-				_ | otherwise → 0
-	piece_val Ú _ _ = 3
-	piece_val Û _ _ = 3
-	piece_val Ü _ _ = 5
-	piece_val Ý _ _ = 9
-	piece_val Þ _ _ = 0
+	piece_val fig colour (_,rank) = case fig of
+		Ù → 1 + case abs $ fromEnum rank - fromEnum $ baseRank (nextColour colour) of
+			1             → 4
+			2             → 2
+			_ | otherwise → 0
+		Ú → 3
+		Û → 3
+		Ü → 5
+		Ý → 9
+		Þ → 0
 	mobility = fromIntegral $
 		length (potentialMoves $ pos { pColourToMove = White }) -
 		length (potentialMoves $ pos { pColourToMove = Black })
