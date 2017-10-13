@@ -1,4 +1,5 @@
 {-# LANGUAGE UnicodeSyntax,RecordWildCards,FlexibleInstances,OverlappingInstances,TupleSections #-}
+{-# OPTIONS_GHC -fno-warn-tabs #-}
 
 module Main where
 
@@ -27,7 +28,7 @@ type Square = Maybe (Colour,Piece)
 
 type Coors = (Int,Int)
 instance Show Coors where
-	show (file,rank) = (chr $ ord 'a' + file - 1) : show rank
+	show (file,rank) = ['a'..]!!(file-1) : show rank
 
 data Position = Position {
 	pBoard              :: Board,
@@ -284,7 +285,7 @@ main = loop 2 initialPosition stackNew where
 		case input of
 			"i" → loop maxdepth initialPosition stackNew
 			"q" → return ()
-			"s" → execute_move $ last $ snd $ search maxdepth pos []
+			"s" → execute_move $ last $ snd $ search     maxdepth pos []
 			"b" → case stackPop pos_history of
 				Nothing → do
 					putStrLn "There is no previous position."

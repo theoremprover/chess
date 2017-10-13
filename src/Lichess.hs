@@ -1,44 +1,36 @@
-{-# LANGUAGE DeriveGeneric,ScopedTypeVariables #-}
+{-# LANGUAGE DeriveGeneric,ScopedTypeVariables,OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-tabs #-}
 
 module Main where
 
-import Debug.Trace
+--import Debug.Trace
 import Wuss
-import Network.Connection
+--import Network.Connection
 import Network.Socket
-import qualified Network.WebSockets as WS
+import Network.WebSockets as WS
 import qualified Data.Text as T
 import Control.Monad.Trans
-import Data.ByteString.Lazy.Char8 as BS
-import Data.ByteString.Lazy as BSL
-import Data.ByteString as BSX
-import Data.ByteString.Char8 as BS8
+import Data.ByteString.Char8 as BS
+import Data.ByteString.Lazy.Char8 as BSL
+--import Data.ByteString as BSX
+--import Data.ByteString.Char8 as BS8
+import System.Random
+import Control.Monad
+import Data.CaseInsensitive
 
-import Network.WebSockets.Stream
+--import Network.WebSockets.Stream
+
+apiVersion = 2
 
 main = do
-	let tlsSettings = TLSSettingsSimple
-		-- This is the important setting.
-		{ settingDisableCertificateValidation = True
-		, settingDisableSession = False
-		, settingUseServerName = False
-		}
-	let connectionParams = ConnectionParams
-		{ connectionHostname = "socket.lichess.org"
-		, connectionPort = 443
-		, connectionUseSecure = Just tlsSettings
-		, connectionUseSocks = Nothing
-		}
-	let headers = []
-	context <- initConnectionContext
-	connection <- connectTo context connectionParams
-	stream <- makeStream
-		(fmap Just (connectionGetChunk connection))
-		(maybe (return ()) (connectionPut connection . (\ a -> trace (BS8.unpack a) a) . toStrict))
-	WS.runClientWithStream stream "socket.lichess.org" "/lobby/socket/v2?sri=abdhfzends" WS.defaultConnectionOptions headers app
-
---	withSocketsDo $ runSecureClient "socket.lichess.org" 443 "/lobby/socket/v2?sri=abdhfzends" app
+	sri <- forM [1..10] $ \ _ -> getStdRandom (randomR ('a','z'))
+	print sri
+	withSocketsDo $ runSecureClientWith
+		"socket.lichess.org" 443 ("/lobby/socket/v" ++ show apiVersion ++ "?sri=" ++ sri)
+		defaultConnectionOptions
+		[	("X-Requested-With","XMLHttpRequest"),
+			("Accept",BS.pack $ "application/vnd.lichess.v" ++ show apiVersion ++ "+json") ]
+		app
 
 app conn = do
 	WS.sendTextData conn $ T.pack "{t:\"p\"}"
@@ -47,7 +39,7 @@ app conn = do
 
 	liftIO $ Prelude.putStrLn "XXXXXXXXXX"
 	WS.Text msg <- WS.receiveDataMessage conn
-	liftIO $ BS.putStrLn msg
+	liftIO $ BSL.putStrLn msg
 
 {-
 import GHC.Generics
