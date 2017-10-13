@@ -1,10 +1,12 @@
 import Control.Parallel
 
 process []           = []
-process (first:rest) = process smaller ++ [first] ++ process bigger
-	where
+
+process (first:rest) = let
 	smaller = filter (<= first) rest
 	bigger  = filter (>  first) rest
+	in
+	process smaller ++ [first] ++ process bigger
 
 process_par _ []           = []
 process_par n (first:rest) = (if n<=3 then bigger `par` smaller else smaller) ++ [first] ++ bigger
