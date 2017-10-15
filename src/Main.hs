@@ -18,7 +18,6 @@ import Data.Stack
 import System.IO
 import Text.Printf
 
-import DGTSerial
 import Chess200
 
 main = loop 2 initialPosition stackNew where
