@@ -1,18 +1,16 @@
 {-# LANGUAGE UnicodeSyntax,RecordWildCards,FlexibleInstances,OverlappingInstances,TupleSections #-}
 {-# OPTIONS_GHC -fno-warn-tabs #-}
 
-module Main where
+module Chess200 where
 
 import Prelude.Unicode
 import Data.Char
 import Data.Array
 import Data.Maybe
 import Data.List
-import Data.Stack
 import Data.NumInstances
 import Data.Ord
 import Text.Printf
-import System.IO
 
 data Colour = White | Black
 	deriving (Show,Eq,Enum,Bounded,Ord)
@@ -39,6 +37,17 @@ data Position = Position {
 	pHalfmoveClock      :: Int,
 	pNextMoveNumber     :: Int }
 
+testPosition = initialPosition {
+	pBoard = boardFromString [
+		"ÚçØçØçØç",
+		"îßçäçßçØ",
+		"ØçßçØïØç",
+		"çØçØîãçØ",
+		"ØçØçØçØç",
+		"çØçØçØçØ",
+		"ØïØçØèØç",
+		"çØëØíØçØ" ] }
+
 initialPosition = Position {
 	pBoard = boardFromString [
 		"âïáòäðàñ",
@@ -59,8 +68,9 @@ initialPosition = Position {
 allOfThem :: (Enum a,Bounded a,Ord a) => [a]
 allOfThem = [minBound..maxBound]
 
-boardFromString ranks = array ((1,1),(max_f,max_r)) $ zip [ (f,r) | r <- reverse [1..max_r], f <- [1..max_f] ]
-	(concatMap read_rank ranks)
+boardFromString ranks = array ((1,1),(max_f,max_r)) $
+	zip [ (f,r) | r <- reverse [1..max_r], f <- [1..max_f] ] 
+		(concatMap read_rank ranks)
 	where
 	read_rank = map read_square
 	(max_f,max_r) = (maximum (map length ranks),length ranks)
@@ -82,8 +92,9 @@ show_square darksquare square = case square of
 	Just (Black,piece) | darksquare → "îïðñòó" !! (fromEnum piece)
 	Just (Black,piece)              → "ßàáâãä" !! (fromEnum piece)
 
-read_square c = lookup c [ (show_square dark (Just (col,piece)), (col,piece)) |
-	col <- allOfThem, piece <- allOfThem, dark <- allOfThem ]
+read_square c = lookup c all_squares where
+	all_squares = [ (show_square dark (Just (col,piece)), (col,piece)) |
+		col <- allOfThem, piece <- allOfThem, dark <- allOfThem ]
 
 instance Show Position where
 	show Position{..} = printf "¡¢¢¢¢¢¢¢¢£\n%s¦±²³´µ¶·¸¨\n%s to do move %i\n"
@@ -92,8 +103,9 @@ instance Show Position where
 		((min_f,min_r),(max_f,max_r)) = bounds pBoard
 		show_rank r = (" ©ª«¬»®¯°" !! r) : [ show_square (mod (f+r) 2 == 0) (pBoard!(f,r)) | f <- [min_f..max_f] ] ++ "¥"
 
+addCoors :: Board -> Coors -> (Int,Int) -> Maybe Coors
 addCoors board coors offset = case coors+offset of
-	coors' | coors' `elem` (indices board) → Just coors'
+	coors' | coors' ∈ (indices board) → Just coors'
 	_      | otherwise                     → Nothing
 
 data Move =
@@ -127,9 +139,6 @@ doMove pos@Position{..} move = pos {
 				Just promote_to → Just (pColourToMove,promote_to) ) ]
 		Castling Queenside → [ ((1,base),Nothing), ((4,base),pBoard!(1,base)), ((5,base),Nothing), ((3,base),pBoard!(5,base)) ]
 		Castling Kingside  → [ ((8,base),Nothing), ((6,base),pBoard!(8,base)), ((5,base),Nothing), ((7,base),pBoard!(5,base)) ],
-
-	pCanCastleQueenSide = (if forfeit_queenside then delete pColourToMove else id) pCanCastleQueenSide,
-	pCanCastleKingSide  = (if forfeit_kingside  then delete pColourToMove else id) pCanCastleKingSide,
 	pColourToMove       = nextColour pColourToMove,
 
 	pHalfmoveClock      = case move of
@@ -144,7 +153,10 @@ doMove pos@Position{..} move = pos {
 			Just (_,Ù) <- pBoard!from,
 			Just to == addCoors pBoard from (2*pawn_step),
 			Just middle <- addCoors pBoard from pawn_step → Just (middle,to)
-		_ | otherwise                                     → Nothing }
+		_ | otherwise                                     → Nothing,
+
+	pCanCastleQueenSide = (if forfeit_queenside then delete pColourToMove else id) pCanCastleQueenSide,
+	pCanCastleKingSide  = (if forfeit_kingside  then delete pColourToMove else id) pCanCastleKingSide  }
 
 	where
 
@@ -172,7 +184,8 @@ coorsNotInCheck pos@Position{..} coors = all (≠coors) [ moveTo |
 
 kingsCoors Position{..} = head [ coors | (coors,Just (col,Þ)) <- assocs pBoard, col == pColourToMove ]
 
-potentialMoves pos@Position{..} = normal_moves ++ castling_moves where
+potentialMoves Position{..} = normal_moves ++ castling_moves where
+
 	normal_moves = [ Move src dest mb_takes mb_promote |
 		(src,Just (colour,piece)) <- assocs pBoard,
 		colour==pColourToMove,
@@ -213,8 +226,10 @@ potentialMoves pos@Position{..} = normal_moves ++ castling_moves where
 		mb_promote <- case piece of
 			Ù | to_rank == baseRank (nextColour pColourToMove) → map Just [Ý,Ú,Û,Ü]
 			_ | otherwise                                      → [ Nothing ] ]
+
 	castling_moves = [ Castling Kingside  | pColourToMove ∈ pCanCastleKingSide,  all square_empty [(6,base),(7,base)] ] ++
 		             [ Castling Queenside | pColourToMove ∈ pCanCastleQueenSide, all square_empty [(4,base),(3,base),(2,base)] ]
+
 	base = baseRank pColourToMove
 	square_empty = isNothing . (pBoard!)
 
@@ -247,10 +262,12 @@ rate pos@Position{..} | max_one_light_figure = (eQUAL,Just $ Draw NoMatePossible
 	all_light_figures = all (∈ [Ú,Û])
 
 rate pos = (rating,Nothing) where
-	rating = 0.01*mobility + sum [ (if colour==White then id else negate) (piece_val piece colour coors) |
-		(coors,Just (colour,piece)) <- assocs $ pBoard pos ]
+	rating = 0.01*mobility +
+		sum [ (if colour==White then id else negate) (piece_val piece colour coors) |
+			(coors,Just (colour,piece)) <- assocs $ pBoard pos ]
+
 	piece_val fig colour (_,rank) = case fig of
-		Ù → 1 + case abs (fromEnum rank - fromEnum (baseRank (nextColour colour))) of
+		Ù → 1 + case abs $ fromEnum rank - fromEnum (baseRank (nextColour colour)) of
 			1             → 4
 			2             → 2
 			_ | otherwise → 0
@@ -259,6 +276,7 @@ rate pos = (rating,Nothing) where
 		Ü → 5
 		Ý → 9
 		Þ → 0
+
 	mobility = fromIntegral $
 		length (potentialMoves $ pos { pColourToMove = White }) -
 		length (potentialMoves $ pos { pColourToMove = Black })
@@ -267,37 +285,9 @@ type Depth = Int
 type Line  = [Move]
 
 search :: Depth → Position → Line → (Rating,Line)
-search depth pos              line | moveGen pos == [] ∨ depth==0 = (fst $ rate pos,line)
-search depth pos@Position{..} line = minimax (comparing fst) (map go_deeper $ moveGen pos) where
-	minimax        = if pColourToMove == White then maximumBy else minimumBy
+search depth pos line | moveGen pos == [] ∨ depth==0 = (fst $ rate pos,line)
+search depth pos line = minimax (comparing fst) (map go_deeper $ moveGen pos)
+	where
+	minimax        = if pColourToMove pos == White then maximumBy else minimumBy
 	go_deeper move = search (depth-1) (doMove pos move) (move:line)
 
-main = loop 2 initialPosition stackNew where
-	loop :: Depth → Position → Stack Position → IO ()
-	loop maxdepth pos pos_history = do
-		print pos
-		putStrLn $ printf "Rating = %.2f" (fst $ rate pos)
-		putStrLn $ "Possible moves are:" ++ show (moveGen pos)
-		case rate pos of
-			(_,Just matchresult) → print matchresult
-			_ | otherwise        → return ()
-		input <- putStr "? " >> hFlush stdout >> getLine
-		case input of
-			"i" → loop maxdepth initialPosition stackNew
-			"q" → return ()
-			"s" → execute_move $ last $ snd $ search     maxdepth pos []
-			"b" → case stackPop pos_history of
-				Nothing → do
-					putStrLn "There is no previous position."
-					loop maxdepth pos pos_history
-				Just (stack',prev_pos) → loop maxdepth prev_pos stack'
-			depth_str | [(depth,[])] <- reads depth_str → loop depth pos pos_history
-			move_str → case lookup move_str $ map (\ m → (show m,m)) (moveGen pos) of
-				Nothing   → do
-					putStrLn "This is no (legal) move or command."
-					loop maxdepth pos pos_history
-				Just move → execute_move move
-		where
-		execute_move move = do
-			putStrLn $ "Moving " ++ show move
-			loop maxdepth (doMove pos move) (stackPush pos_history pos)
