@@ -37,17 +37,6 @@ data Position = Position {
 	pHalfmoveClock      :: Int,
 	pNextMoveNumber     :: Int }
 
-testPosition = initialPosition {
-	pBoard = boardFromString [
-		"ÚçØçØçØç",
-		"îßçäçßçØ",
-		"ØçßçØïØç",
-		"çØçØîãçØ",
-		"ØçØçØçØç",
-		"çØçØçØçØ",
-		"ØïØçØèØç",
-		"çØëØíØçØ" ] }
-
 initialPosition = Position {
 	pBoard = boardFromString [
 		"âïáòäðàñ",
@@ -127,6 +116,8 @@ instance Show Move where
 		Just Ý → "Q"
 	show (Castling Queenside) = "O-O-O"
 	show (Castling Kingside)  = "O-O"
+
+doMove :: Position → Move → Position
 
 doMove pos@Position{..} move = pos {
 
